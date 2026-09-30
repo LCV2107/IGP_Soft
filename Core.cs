@@ -305,6 +305,8 @@ internal sealed class LaunchedWindow
     public required string ProfileDir { get; init; }
     public required string ProcessName { get; init; }
     public required bool Borderless { get; init; }
+    public IntPtr ParentHwnd { get; init; }
+    public Rectangle DesiredArea;
     public volatile bool Closed;
 }
 
@@ -379,7 +381,7 @@ internal static class MediaWrapper
 
         string html =
             "<!doctype html><html><head><meta charset=\"utf-8\"><title>IGP_Soft</title><style>" +
-            "html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden}" +
+            "html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}" +
             "img,video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}" +
             "</style></head><body>" + element + "</body></html>";
 
@@ -412,7 +414,8 @@ internal static class WindowManager
     /// (una pantalla completa o un segmento de ella), en píxeles físicos.
     /// Devuelve la ventana localizada, o null si no se pudo confirmar.
     /// </summary>
-    public static LaunchedWindow? LaunchAndPlace(Browser browser, string url, Rectangle area, string tag)
+    public static LaunchedWindow? LaunchAndPlace(Browser browser, string url, Rectangle area, string tag,
+        IntPtr parentHwnd = default)
     {
         lock (LaunchGate)
         {
@@ -432,8 +435,8 @@ internal static class WindowManager
             };
             if (browser.Family == BrowserFamily.Chromium)
             {
-                // --app abre una ventana sin pestañas ni barra de direcciones, pero
-                // SÍ se puede cerrar con Alt+F4 o Ctrl+W (a diferencia de --kiosk).
+                // --app abre el contenido sin pestañas ni barra de direcciones antes
+                // de integrarlo en la superficie contenedora.
                 psi.ArgumentList.Add($"--user-data-dir={profileDir}");
                 psi.ArgumentList.Add("--no-first-run");
                 psi.ArgumentList.Add("--no-default-browser-check");
@@ -447,8 +450,7 @@ internal static class WindowManager
             }
             else // Firefox
             {
-                // Sin --kiosk: se puede cerrar con Alt+F4 / Ctrl+W. La barra se oculta
-                // con userChrome.css y la ventana se deja sin bordes cubriendo el monitor.
+                // La barra se oculta con userChrome.css antes de integrar la ventana.
                 WriteFirefoxProfile(profileDir);
                 psi.ArgumentList.Add("-profile");
                 psi.ArgumentList.Add(profileDir);
@@ -469,12 +471,18 @@ internal static class WindowManager
                     started.BeginErrorReadLine();
                 }
             }
-            catch { return null; }
+            catch
+            {
+                CleanupProfile(browser.ProcessName, profileDir);
+                return null;
+            }
 
             // Localizar la ventana cuyo proceso se lanzó con NUESTRO perfil temporal.
             // Así nunca se confunde con una ventana que el usuario ya tenía abierta.
+            // La línea de comandos de un PID no cambia: se consulta (WMI, lento) una sola vez por proceso.
             IntPtr hwnd = IntPtr.Zero;
             int pid = 0;
+            var ownPid = new Dictionary<int, bool>();
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 15000 && hwnd == IntPtr.Zero)
             {
@@ -482,15 +490,21 @@ internal static class WindowManager
                 foreach ((IntPtr h, int p) in EnumBrowserWindows(browser.ProcessName))
                 {
                     if (before.Contains(h)) continue;
-                    string? cl = ProcessInfo.CommandLine(p);
-                    if (cl is not null && cl.Contains(profileDir, StringComparison.OrdinalIgnoreCase))
+                    if (!ownPid.TryGetValue(p, out bool ours))
                     {
-                        hwnd = h; pid = p; break;
+                        string? cl = ProcessInfo.CommandLine(p);
+                        ours = cl is not null && cl.Contains(profileDir, StringComparison.OrdinalIgnoreCase);
+                        if (cl is not null) ownPid[p] = ours;   // null: WMI falló, se reintenta
                     }
+                    if (ours) { hwnd = h; pid = p; break; }
                 }
             }
 
-            if (hwnd == IntPtr.Zero) return null;
+            if (hwnd == IntPtr.Zero)
+            {
+                CleanupProfile(browser.ProcessName, profileDir);
+                return null;
+            }
 
             // Todas las familias sin bordes: así llenan el rectángulo sin dejar ver el escritorio.
             const bool borderless = true;
@@ -498,16 +512,17 @@ internal static class WindowManager
             {
                 ProcessId = pid, Hwnd = hwnd, ProfileDir = profileDir,
                 ProcessName = browser.ProcessName, Borderless = borderless,
+                ParentHwnd = parentHwnd, DesiredArea = area,
             };
 
-            PlaceWindow(hwnd, area, borderless);
+            PlaceWindow(win);
             // Reafirmar posición y "sin bordes" unos segundos (la ventana tiende a re-encajar al abrir).
             Task.Run(() =>
             {
                 for (int i = 0; i < 24 && !win.Closed; i++)
                 {
                     Thread.Sleep(500);
-                    if (NativeMethods.IsWindow(hwnd)) PlaceWindow(hwnd, area, borderless);
+                    if (NativeMethods.IsWindow(hwnd)) PlaceWindow(win);
                     else break;
                 }
             });
@@ -521,8 +536,12 @@ internal static class WindowManager
     {
         try
         {
-            if (NativeMethods.IsWindow(win.Hwnd))
-                PlaceWindow(win.Hwnd, area, win.Borderless);
+            lock (win)
+            {
+                win.DesiredArea = area;
+                if (NativeMethods.IsWindow(win.Hwnd))
+                    PlaceWindow(win);
+            }
         }
         catch { /* ignore */ }
     }
@@ -553,19 +572,23 @@ internal static class WindowManager
 
         Thread.Sleep(900);
 
-        // 2) Forzar el cierre de TODO proceso lanzado con este perfil temporal.
-        foreach (int pid in ProcessInfo.ByCommandLineContains(win.ProcessName, win.ProfileDir))
+        // 2) Forzar el cierre de TODO proceso lanzado con este perfil temporal y limpiar.
+        CleanupProfile(win.ProcessName, win.ProfileDir);
+    }
+
+    private static void CleanupProfile(string processName, string profileDir)
+    {
+        foreach (int pid in ProcessInfo.ByCommandLineContains(processName, profileDir))
         {
             try { Process.GetProcessById(pid).Kill(entireProcessTree: true); }
             catch { /* ya terminó */ }
         }
 
-        // 3) Borrar el perfil temporal.
         for (int i = 0; i < 5; i++)
         {
             try
             {
-                if (Directory.Exists(win.ProfileDir)) Directory.Delete(win.ProfileDir, recursive: true);
+                if (Directory.Exists(profileDir)) Directory.Delete(profileDir, recursive: true);
                 break;
             }
             catch { Thread.Sleep(400); }
@@ -574,29 +597,59 @@ internal static class WindowManager
 
     // --- helpers Win32 -----------------------------------------------------
 
-    private static void PlaceWindow(IntPtr hwnd, Rectangle area, bool borderless)
+    private static void PlaceWindow(LaunchedWindow win)
     {
-        if (NativeMethods.IsIconic(hwnd))
-            NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
-
-        bool frameChanged = false;
-        if (borderless)
+        lock (win)
         {
-            // Quita título y borde para que el contenido web llene TODO el rectángulo
-            // (Chrome/Brave/Edge en modo --app conservan un marco si no se les quita).
-            long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
-            long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME);
-            if (want != cur)
+            IntPtr hwnd = win.Hwnd;
+            Rectangle area = win.DesiredArea;
+            if (NativeMethods.IsIconic(hwnd))
+                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+
+            bool frameChanged = false;
+            if (win.Borderless)
             {
-                NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want));
+                // Quita título y borde para que el contenido web llene TODO el rectángulo.
+                long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
+                long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME |
+                                    NativeMethods.WS_POPUP);
+                if (win.ParentHwnd != IntPtr.Zero) want |= NativeMethods.WS_CHILD;
+                if (want != cur)
+                {
+                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want));
+                    frameChanged = true;
+                }
+            }
+
+            if (win.ParentHwnd != IntPtr.Zero && NativeMethods.GetParent(hwnd) != win.ParentHwnd)
+            {
+                NativeMethods.SetParent(hwnd, win.ParentHwnd);
                 frameChanged = true;
             }
-        }
 
-        // HWND_TOPMOST: por encima de la barra de tareas (que si no, se dibuja sobre la ventana).
-        uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW;
-        if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
-        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, area.X, area.Y, area.Width, area.Height, flags);
+            // Embebida y ya en su sitio: no se toca (la vigilancia periódica no debe provocar
+            // re-layouts ni parpadeo en el navegador).
+            if (!frameChanged && win.ParentHwnd != IntPtr.Zero &&
+                NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, area))
+                return;
+
+            // Las ventanas embebidas usan coordenadas relativas a la superficie contenedora.
+            // Las ventanas independientes (selftest) conservan el comportamiento anterior.
+            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW;
+            if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
+            IntPtr order = win.ParentHwnd == IntPtr.Zero ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP;
+            NativeMethods.SetWindowPos(hwnd, order, area.X, area.Y, area.Width, area.Height, flags);
+        }
+    }
+
+    /// <summary>¿La ventana ocupa exactamente <paramref name="area"/> dentro de su contenedor (sin bordes)?</summary>
+    private static bool IsAt(IntPtr hwnd, IntPtr parent, Rectangle area)
+    {
+        if (!NativeMethods.GetWindowRect(hwnd, out NativeMethods.RECT r) ||
+            !NativeMethods.GetWindowRect(parent, out NativeMethods.RECT p))
+            return false;
+        return r.Left - p.Left == area.X && r.Top - p.Top == area.Y &&
+               r.Right - r.Left == area.Width && r.Bottom - r.Top == area.Height;
     }
 
     private static void WriteFirefoxProfile(string dir)
@@ -755,6 +808,12 @@ internal static class NativeMethods
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
     [DllImport("user32.dll")]
+    public static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetParent(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
@@ -776,6 +835,7 @@ internal static class NativeMethods
     public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public static readonly IntPtr HWND_TOP = IntPtr.Zero;
     public const int SW_RESTORE = 9;
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
@@ -788,6 +848,8 @@ internal static class NativeMethods
     public const int GWL_STYLE = -16;
     public const long WS_CAPTION = 0x00C00000;
     public const long WS_THICKFRAME = 0x00040000;
+    public const long WS_CHILD = 0x40000000;
+    public const long WS_POPUP = unchecked((long)0x80000000);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }

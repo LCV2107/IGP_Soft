@@ -10,7 +10,9 @@ internal sealed class MainForm : Form
     private readonly HashSet<string> _openedUrls = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _excludedDevices = new();
     private readonly List<MonitorTile> _tiles = new();
+    private readonly Dictionary<string, DisplaySurface> _surfaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Form> _identifyForms = new();
+    private readonly List<Task<LaunchedWindow?>> _pendingLaunches = new();
     private bool _skipPrimaryTouched;
 
     private readonly Label _info = new();
@@ -62,7 +64,7 @@ internal sealed class MainForm : Form
         {
             CheckClosedWindows();
             EnforceWindows();        // ventanas de monitoreo: llenar su zona, sin huecos ni barra de tareas
-            ApplyPanelStacking();    // el panel encima solo si hay "pared activa"
+            ApplyPanelStacking();    // mantiene el panel accesible sobre las superficies activas
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
@@ -81,6 +83,8 @@ internal sealed class MainForm : Form
             _showReg?.Unregister(null);
             _showEvent?.Dispose();
             CloseIdentifyForms();
+            CloseAllSurfaces();
+            CloseInFlightLaunches();
             ClearPreviews();
             _tray.Visible = false;
             _tray.Dispose();
@@ -241,13 +245,19 @@ internal sealed class MainForm : Form
     private void ExitApp()
     {
         if (!Visible) ShowFromTray();
-        if (_tiles.Any(t => t.Segments.Any(s => s.Launched is not null)))
+        if (_tiles.Any(t => t.Segments.Any(s => s.Launched is not null || s.Pending is not null)))
         {
             DialogResult r = MessageBox.Show(this,
-                "¿Cerrar también las ventanas de monitoreo que están abiertas?",
-                "Salir de IGP_Soft", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-            if (r == DialogResult.Cancel) return;
-            if (r == DialogResult.Yes) CloseAllWindows();
+                "Al salir se cerrarán las pantallas de monitoreo y su contenido. ¿Desea continuar?",
+                "Salir de IGP_Soft", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+            if (r != DialogResult.OK) return;
+
+            var windows = _tiles.SelectMany(t => t.Segments)
+                                .Where(s => s.Launched is not null)
+                                .Select(s => s.Launched!)
+                                .ToList();
+            CloseAllSurfaces();
+            foreach (LaunchedWindow window in windows) WindowManager.Close(window);
         }
         _reallyExit = true;
         Close();
@@ -271,14 +281,19 @@ internal sealed class MainForm : Form
     {
         CloseIdentifyForms();
 
-        var prev = new Dictionary<string, (int seg, List<(LinkDef? Link, LaunchedWindow? Win)> items)>();
+        List<MonitorInfo> current = MonitorEnumerator.GetOrdered();
+        var currentDevices = current.Select(m => m.DeviceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (MonitorTile missing in _tiles.Where(t => !currentDevices.Contains(t.Monitor.DeviceName)).ToList())
+            CloseTileWindows(missing);
+
+        var prev = new Dictionary<string, (int seg, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items)>();
         foreach (MonitorTile t in _tiles)
-            prev[t.Monitor.DeviceName] = (t.SegCount, t.Segments.Select(s => (s.Link, s.Launched)).ToList());
+            prev[t.Monitor.DeviceName] = (t.SegCount, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
 
         foreach (MonitorTile t in _tiles) { _canvas.Controls.Remove(t); t.Dispose(); }
         _tiles.Clear();
 
-        _monitors = MonitorEnumerator.GetOrdered();
+        _monitors = current;
 
         if (!_skipPrimaryTouched)
             _chkSkipPrimary.Checked = _monitors.Count > LinkStore.Links.Count;
@@ -295,6 +310,7 @@ internal sealed class MainForm : Form
                 {
                     tile.Segments[k].Link = pv.items[k].Link;
                     tile.Segments[k].Launched = pv.items[k].Win;
+                    tile.Segments[k].Pending = pv.items[k].Pending;
                 }
             }
 
@@ -303,6 +319,14 @@ internal sealed class MainForm : Form
             tile.SegStep += ChangeSegments;
             _tiles.Add(tile);
             _canvas.Controls.Add(tile);
+
+            if (_surfaces.TryGetValue(m.DeviceName, out DisplaySurface? surface) && !surface.IsDisposed)
+            {
+                surface.Place(m);
+                foreach (Segment s in tile.Segments)
+                    if (s.Launched is not null)
+                        WindowManager.Reposition(s.Launched, ToSurfaceArea(tile, s.Area));
+            }
         }
 
         ApplySkipPrimary();
@@ -381,30 +405,27 @@ internal sealed class MainForm : Form
     {
         bool cambio = false;
         foreach (MonitorTile t in _tiles.ToList())
-        foreach (Segment s in t.Segments.ToList())
         {
-            if (s.Launched is null || NativeMethods.IsWindow(s.Launched.Hwnd)) continue;
+            foreach (Segment s in t.Segments.ToList())
+            {
+                if (s.Launched is null || NativeMethods.IsWindow(s.Launched.Hwnd)) continue;
 
-            LaunchedWindow w = s.Launched;
-            s.Launched = null;
-            if (s.Link is not null) { _openedUrls.Remove(s.Link.Url); s.Link = null; }
-            t.Invalidate();
-            Task.Run(() => WindowManager.Close(w));
-            cambio = true;
+                LaunchedWindow w = s.Launched;
+                s.Launched = null;
+                if (s.Link is not null) { _openedUrls.Remove(s.Link.Url); s.Link = null; }
+                t.Invalidate();
+                Task.Run(() => WindowManager.Close(w));
+                cambio = true;
+            }
+            CloseSurfaceIfEmpty(t);
         }
         if (cambio) UpdateInfo();
     }
 
-    /// <summary>Hay "pared activa" si algún monitor no omitido está completamente
-    /// cubierto por ventanas de monitoreo abiertas.</summary>
+    /// <summary>Hay una superficie activa cuando al menos una zona contiene contenido.</summary>
     private bool IsWallActive()
     {
-        foreach (MonitorTile t in _tiles)
-        {
-            if (t.Excluded || t.Segments.Count == 0) continue;
-            if (t.Segments.All(s => s.Launched is not null)) return true;
-        }
-        return false;
+        return _tiles.Any(t => !t.Excluded && t.Segments.Any(s => s.Launched is not null || s.Pending is not null));
     }
 
     /// <summary>Cada ventana de monitoreo se reafirma en su zona, sin bordes y sobre
@@ -416,11 +437,10 @@ internal sealed class MainForm : Form
         foreach (MonitorTile t in _tiles)
             foreach (Segment s in t.Segments)
                 if (s.Launched is not null)
-                    WindowManager.Reposition(s.Launched, s.Area);
+                    WindowManager.Reposition(s.Launched, ToSurfaceArea(t, s.Area));
     }
 
-    /// <summary>El panel se pone por encima de todo solo cuando hay "pared activa"
-    /// (algún monitor completamente cubierto). Si no, vuelve a ser una ventana normal.</summary>
+    /// <summary>El panel permanece accesible por encima de las superficies activas.</summary>
     private void ApplyPanelStacking()
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
@@ -549,9 +569,9 @@ internal sealed class MainForm : Form
         menu.Items.Add(omitir);
         menu.Items.Add(new ToolStripSeparator());
 
-        if (seg.Launched is not null)
+        if (seg.Launched is not null || seg.Pending is not null)
         {
-            var cerrar = new ToolStripMenuItem("✖  Cerrar esta ventana");
+            var cerrar = new ToolStripMenuItem(seg.Pending is not null ? "✖  Cancelar apertura" : "✖  Cerrar esta ventana");
             cerrar.Click += (_, _) => CloseSeg(tile, seg);
             menu.Items.Add(cerrar);
             menu.Items.Add(new ToolStripSeparator());
@@ -564,7 +584,7 @@ internal sealed class MainForm : Form
             var item = new ToolStripMenuItem((aqui ? "" : "Abrir: ") + link.Titulo)
             {
                 Checked = aqui,
-                Enabled = !enOtro && !aqui,
+                Enabled = !enOtro && !aqui && seg.Pending is null,
             };
             if (enOtro) item.Text += "   (ya abierto)";
             LinkDef captured = link;
@@ -573,7 +593,7 @@ internal sealed class MainForm : Form
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…");
+        var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…") { Enabled = seg.Pending is null };
         custom.Click += (_, _) => AddCustomElement(tile, seg);
         menu.Items.Add(custom);
 
@@ -592,9 +612,9 @@ internal sealed class MainForm : Form
 
     // ------------------------------------------------------------------ acciones
 
-    private void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link)
+    private async void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link)
     {
-        if (tile.Excluded) return;
+        if (tile.Excluded || seg.Pending is not null || _browser is null) return;
 
         if (_openedUrls.Contains(link.Url) && seg.Link?.Url != link.Url)
         {
@@ -603,37 +623,78 @@ internal sealed class MainForm : Form
             return;
         }
 
-        if (seg.Launched is not null) CloseSeg(tile, seg);
+        if (seg.Launched is not null || seg.Link is not null) CloseSeg(tile, seg);
 
-        UseWaitCursor = true;
-        LaunchedWindow? win;
-        try
-        {
-            win = WindowManager.LaunchAndPlace(_browser!, link.Url, seg.Area,
-                $"{tile.Monitor.ShortName}-{seg.Index}");
-        }
+        DisplaySurface surface;
+        try { surface = EnsureSurface(tile); }
         catch (Exception ex)
         {
-            UseWaitCursor = false;
-            MessageBox.Show(this, $"No se pudo abrir el navegador:\n{ex.Message}",
+            CloseSurfaceIfEmpty(tile);
+            MessageBox.Show(this, $"No se pudo preparar la pantalla:\n{ex.Message}",
                 "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
-        UseWaitCursor = false;
 
-        _openedUrls.Add(link.Url);
+        // La zona y el enlace quedan reservados mientras el navegador arranca en segundo plano,
+        // así el panel sigue respondiendo y nadie más puede usar ese enlace o esa zona.
+        var token = new object();
+        seg.Pending = token;
         seg.Link = link;
-        seg.Launched = win;
+        _openedUrls.Add(link.Url);
         tile.Invalidate();
+        UpdateInfo();
+
+        Browser browser = _browser;
+        Rectangle area = ToSurfaceArea(tile, seg.Area);
+        string tag = $"{tile.Monitor.ShortName}-{seg.Index}";
+        IntPtr parent = surface.Handle;
+
+        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, link.Url, area, tag, parent));
+        _pendingLaunches.Add(launch);
+        LaunchedWindow? win = null;
+        string? error = null;
+        try { win = await launch; }
+        catch (Exception ex) { error = ex.Message; }
+        finally { _pendingLaunches.Remove(launch); }
+
+        // Mientras tanto la zona pudo cerrarse, re-segmentarse u omitirse, o el monitor desconectarse.
+        (MonitorTile? t, Segment? s) = FindPending(token);
+        if (IsDisposed || t is null || s is null)
+        {
+            if (win is not null) _ = Task.Run(() => WindowManager.Close(win));
+            return;
+        }
+
+        s.Pending = null;
+        if (win is null)
+        {
+            _openedUrls.Remove(link.Url);
+            s.Link = null;
+            t.Invalidate();
+            UpdateInfo();
+            CloseSurfaceIfEmpty(t);
+            MessageBox.Show(this,
+                error is not null
+                    ? $"No se pudo abrir el navegador:\n{error}"
+                    : $"El navegador se inició, pero no se pudo integrar «{link.Titulo}» en la pantalla. " +
+                      "La zona quedó libre para intentarlo nuevamente.",
+                "No se pudo abrir", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        s.Launched = win;
+        t.Invalidate();
         UpdateInfo();
         EnforceWindows();
         ApplyPanelStacking();
+    }
 
-        if (win is null)
-            MessageBox.Show(this,
-                "El navegador se abrió pero no se pudo confirmar su ventana para recolocarla o cerrarla " +
-                "desde aquí. Si quedó mal ubicada, ciérrala manualmente (Alt+F4 / Ctrl+W).",
-                "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    private (MonitorTile? Tile, Segment? Seg) FindPending(object token)
+    {
+        foreach (MonitorTile t in _tiles)
+            foreach (Segment s in t.Segments)
+                if (ReferenceEquals(s.Pending, token)) return (t, s);
+        return (null, null);
     }
 
     private void AutoAssignInOrder()
@@ -656,10 +717,9 @@ internal sealed class MainForm : Form
         {
             (MonitorTile t, Segment s) = targets[i];
             LinkDef link = LinkStore.Links[i];
-            if (s.Link?.Url == link.Url) continue;
+            if (s.Link?.Url == link.Url || s.Pending is not null) continue;
             if (_openedUrls.Contains(link.Url)) continue;
-            AssignAndOpen(t, s, link);
-            Application.DoEvents();
+            AssignAndOpen(t, s, link);   // cada apertura corre en segundo plano (se serializan en WindowManager)
         }
     }
 
@@ -673,14 +733,15 @@ internal sealed class MainForm : Form
 
         if (newCount < tile.Segments.Count)
             for (int k = newCount; k < tile.Segments.Count; k++)
-                if (tile.Segments[k].Launched is not null || tile.Segments[k].Link is not null)
+                if (tile.Segments[k].Launched is not null || tile.Segments[k].Link is not null ||
+                    tile.Segments[k].Pending is not null)
                     CloseSeg(tile, tile.Segments[k]);
 
         tile.BuildSegments(newCount);
 
         foreach (Segment s in tile.Segments)
             if (s.Launched is not null)
-                WindowManager.Reposition(s.Launched, s.Area);
+                WindowManager.Reposition(s.Launched, ToSurfaceArea(tile, s.Area));
 
         UpdateInfo();
     }
@@ -693,6 +754,8 @@ internal sealed class MainForm : Form
             Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
         }
+        // Si aún estaba abriéndose, al terminar no encontrará su zona y cerrará la ventana.
+        seg.Pending = null;
         if (seg.Link is not null)
         {
             _openedUrls.Remove(seg.Link.Url);
@@ -700,23 +763,78 @@ internal sealed class MainForm : Form
         }
         tile.Invalidate();
         UpdateInfo();
+        CloseSurfaceIfEmpty(tile);
     }
 
     private void CloseTileWindows(MonitorTile tile)
     {
         foreach (Segment s in tile.Segments.ToList())
-            if (s.Launched is not null || s.Link is not null)
+            if (s.Launched is not null || s.Link is not null || s.Pending is not null)
                 CloseSeg(tile, s);
     }
 
     private void CloseAllWindows()
     {
         foreach (MonitorTile t in _tiles.ToList()) CloseTileWindows(t);
+        CloseAllSurfaces();
+    }
+
+    // ------------------------------------------------------------------ superficies
+
+    private DisplaySurface EnsureSurface(MonitorTile tile)
+    {
+        if (!_surfaces.TryGetValue(tile.Monitor.DeviceName, out DisplaySurface? surface) || surface.IsDisposed)
+        {
+            surface = new DisplaySurface(tile.Monitor);
+            _surfaces[tile.Monitor.DeviceName] = surface;
+            surface.Show();
+        }
+        surface.Place(tile.Monitor);
+        TopMost = true;
+        NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        return surface;
+    }
+
+    private static Rectangle ToSurfaceArea(MonitorTile tile, Rectangle screenArea) =>
+        new(screenArea.X - tile.Monitor.X, screenArea.Y - tile.Monitor.Y,
+            screenArea.Width, screenArea.Height);
+
+    private void CloseSurfaceIfEmpty(MonitorTile tile)
+    {
+        if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null)) return;
+        if (!_surfaces.Remove(tile.Monitor.DeviceName, out DisplaySurface? surface)) return;
+        if (!surface.IsDisposed) surface.Close();
+        ApplyPanelStacking();
+    }
+
+    private void CloseAllSurfaces()
+    {
+        foreach (DisplaySurface surface in _surfaces.Values.ToList())
+            if (!surface.IsDisposed) surface.Close();
+        _surfaces.Clear();
+    }
+
+    /// <summary>Al salir: espera las aperturas en curso y cierra lo que abran, para no dejar
+    /// navegadores huérfanos (el bucle de mensajes ya no ejecutará sus continuaciones).
+    /// Las superficies deben estar cerradas antes, así SetParent no espera a este hilo.</summary>
+    private void CloseInFlightLaunches()
+    {
+        foreach (Task<LaunchedWindow?> launch in _pendingLaunches.ToList())
+        {
+            try
+            {
+                if (launch.Wait(TimeSpan.FromSeconds(20)) && launch.Result is { } w)
+                    WindowManager.Close(w);
+            }
+            catch { /* la apertura falló: no hay nada que cerrar */ }
+        }
+        _pendingLaunches.Clear();
     }
 
     private void CloseAll()
     {
-        if (_tiles.All(t => t.Segments.All(s => s.Launched is null)))
+        if (_tiles.All(t => t.Segments.All(s => s.Launched is null && s.Pending is null)))
         {
             MessageBox.Show(this, "No hay ventanas abiertas por este programa.", "Cerrar todas",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -789,7 +907,33 @@ internal sealed class MainForm : Form
         _identifyForms.Clear();
     }
 
-    // ------------------------------------------------------------------ segmento + tile
+    // ------------------------------------------------------------------ superficie + segmento + tile
+
+    private sealed class DisplaySurface : Form
+    {
+        public DisplaySurface(MonitorInfo monitor)
+        {
+            Text = $"IGP_Soft — {monitor.ShortName}";
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+            ControlBox = false;
+            BackColor = Color.White;
+            TopMost = true;
+            Place(monitor);
+        }
+
+        public void Place(MonitorInfo monitor)
+        {
+            Bounds = new Rectangle(monitor.X, monitor.Y, monitor.Width, monitor.Height);
+            if (IsHandleCreated)
+                NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST,
+                    monitor.X, monitor.Y, monitor.Width, monitor.Height,
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+        }
+
+        protected override bool ShowWithoutActivation => true;
+    }
 
     internal sealed class Segment
     {
@@ -798,6 +942,7 @@ internal sealed class MainForm : Form
         public RectangleF TileRect;   // dentro del cuadro del panel
         public LinkDef? Link;
         public LaunchedWindow? Launched;
+        public object? Pending;       // token mientras el navegador se está abriendo
     }
 
     private sealed class MonitorTile : Panel
@@ -859,7 +1004,7 @@ internal sealed class MainForm : Form
                 int h = r == rows - 1 ? Monitor.Height - r * sh : sh;
 
                 var seg = new Segment { Index = i, Area = new Rectangle(x, y, w, h) };
-                if (i < old.Count) { seg.Link = old[i].Link; seg.Launched = old[i].Launched; }
+                if (i < old.Count) { seg.Link = old[i].Link; seg.Launched = old[i].Launched; seg.Pending = old[i].Pending; }
                 Segments.Add(seg);
             }
             LayoutSegments();
@@ -947,9 +1092,12 @@ internal sealed class MainForm : Form
                     Rectangle tr = Rectangle.Round(s.TileRect);
                     var band = new Rectangle(tr.X, tr.Bottom - 16, Math.Max(1, tr.Width), 16);
                     using (var bb = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillRectangle(bb, band);
-                    string txt = s.Link is not null ? "✔ " + s.Link.Titulo : "clic para asignar";
+                    string txt = s.Pending is not null && s.Link is not null ? "⏳ abriendo " + s.Link.Titulo
+                               : s.Link is not null ? "✔ " + s.Link.Titulo
+                               : "clic para asignar";
                     TextRenderer.DrawText(g, txt, sf, band,
-                        s.Link is not null ? Color.FromArgb(150, 255, 175) : Color.White,
+                        s.Pending is not null ? Color.Khaki
+                        : s.Link is not null ? Color.FromArgb(150, 255, 175) : Color.White,
                         C | TextFormatFlags.EndEllipsis);
                 }
             }

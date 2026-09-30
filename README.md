@@ -11,8 +11,8 @@ pantalla completa, eligiendo tú qué enlace va en qué monitor.
   siguen abiertas.
 - **Doble clic** en el icono de la bandeja vuelve a abrir el panel. Clic derecho:
   *Abrir panel · Cerrar todas las ventanas · Salir*.
-- **Salir** cierra el programa de verdad (pregunta si quieres cerrar también las
-  pantallas abiertas).
+- **Salir** cierra el programa de verdad. Como el contenido está integrado en sus
+  superficies, al salir también se cierran todas las pantallas abiertas.
 - **No se puede abrir dos veces**: si ya está corriendo, un segundo lanzamiento
   solo trae el panel al frente.
 
@@ -41,8 +41,12 @@ cada ~1,5 s; se puede apagar con la casilla «Vista previa en vivo»).
 - Al final del menú: **➕ Elemento personalizado (imagen / video / URL)…** —
   elige un archivo local o pega una URL y se abre al instante en ese monitor.
   Puedes marcarlo para que quede guardado también en la lista.
-- **Imágenes y videos** (locales o por URL) se muestran centrados a pantalla
-  completa sobre fondo negro; los videos se reproducen en bucle y sin sonido.
+- Al abrir el primer contenido de un monitor, el programa crea una **superficie
+  blanca, a pantalla completa y sin bordes**. Las ventanas del navegador se
+  integran dentro de esa superficie como zonas; no quedan como ventanas sueltas
+  del escritorio ni muestran sus bordes.
+- **Imágenes y videos** (locales o por URL) se muestran centrados dentro de su
+  zona sobre fondo blanco; los videos se reproducen en bucle y sin sonido.
 - El cuadrado con contenido se marca en verde con **✔ y el nombre**. Un enlace ya
   usado aparece deshabilitado en los demás monitores (no se repite).
 - **Clic en un cuadrado que ya tiene ventana** → el menú incluye
@@ -90,18 +94,17 @@ borran al iniciar el programa.
 
 ### Modo pantalla
 
-- **Todos los navegadores** abren una ventana **sin bordes ni título** que llena
-  exactamente su zona (Chrome/Edge/Brave/Opera en modo `--app`, Firefox con la
-  barra oculta). Se les quita el marco por API de Windows para que **no quede
-  ningún hueco** por donde se vea el escritorio, ni entre zonas contiguas.
-- No se usa `--kiosk`, así que **se cierran** con `Alt+F4` o `Ctrl+W`.
-- Cada ventana se reafirma en su sitio cada ~1,5 s (posición, sin bordes y sobre
-  la barra de tareas).
-- **Modo "pared activa"**: cuando algún monitor (no omitido) queda **totalmente
-  cubierto** por ventanas de monitoreo, esas ventanas se mantienen sobre la barra
-  de tareas y el panel se pone por encima de todo.
-- Mientras **no haya ventanas** abiertas, o solo cubran **parte** de la pantalla,
-  todo vuelve a la normalidad: el panel es una ventana común y no estorba.
+- Cada monitor con contenido usa una única **superficie contenedora sin bordes**
+  que cubre toda la pantalla, incluida la barra de tareas. Chrome, Edge, Brave,
+  Opera o Firefox siguen renderizando cada sitio, pero sus ventanas se convierten
+  en hijas de esa superficie y se ajustan a las zonas definidas.
+- A cada ventana integrada se le quitan título, borde y estilo de ventana
+  emergente mediante la API de Windows, de modo que no se vea escritorio entre
+  zonas contiguas.
+- No se usa `--kiosk`; las ventanas integradas se cierran desde el panel.
+- Cada zona se reafirma en su sitio cada ~1,5 s.
+- Mientras haya una superficie activa, el panel se mantiene accesible por encima
+  de ella. Al cerrar la última zona de un monitor, su superficie desaparece.
 - Se suprime el aviso de políticas / primer arranque de Firefox (el perfil es
   nuevo cada vez, por eso antes aparecía siempre).
 - Cada ventana se localiza por su perfil temporal, así el programa nunca toca
@@ -129,16 +132,20 @@ dotnet publish IGP_Soft.csproj -c Release -r win-x64 --no-self-contained -p:Publ
 
 ## Notas
 
-- Cerrar una pantalla: `Alt+F4` o `Ctrl+W` dentro de la ventana, o desde el panel
-  («Cerrar esta ventana» / «Cerrar todas las ventanas»).
+- Cerrar una pantalla: desde el panel («Cerrar esta ventana» / «Cerrar todas las
+  ventanas»).
 - Los archivos temporales de cada pantalla (perfil + envoltorio de imagen/video)
   se borran al cerrar la ventana y al reiniciar el programa.
-- Si cierras una ventana por fuera (`Alt+F4` / `Ctrl+W` / cerrar el proceso), el
-  panel lo detecta en ~1,5 s: el monitor vuelve a quedar libre y el enlace se
-  puede reutilizar.
-- Cada ventana se coloca en su monitor y su posición se reafirma unos segundos.
-- Cerrar el panel **no** cierra las pantallas ya abiertas.
+- Si el proceso del navegador se cierra por fuera, el panel lo detecta en ~1,5 s:
+  la zona vuelve a quedar libre y el enlace se puede reutilizar.
+- Los navegadores se abren en segundo plano: el panel sigue respondiendo y la
+  zona muestra «⏳ abriendo …» hasta que el contenido queda integrado. Desde su
+  menú se puede **cancelar la apertura**.
+- Cada ventana se integra en la superficie de su monitor y su zona se reafirma
+  cada ~1,5 s (solo se toca si se ha movido).
+- Cerrar el panel con **X** solo lo oculta en la bandeja: las pantallas siguen
+  abiertas. **Salir** (menú de la bandeja) sí las cierra todas.
 - `IGP_Soft.exe --selftest` abre una prueba de consola que verifica la ubicación
-  en cada monitor.
-- Firefox y Opera no aceptan posición por línea de comandos: su ventana se reubica
-  en el monitor destino con la API de Windows justo después de abrirse.
+  en cada monitor (sin superficie contenedora; ventanas independientes).
+- Las ventanas integradas pertenecen a otro proceso (el navegador): son para
+  mostrar contenido; la interacción con teclado dentro de ellas puede ser limitada.

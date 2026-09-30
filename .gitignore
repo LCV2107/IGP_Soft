@@ -1,1 +1,4 @@
 dist/
+dist-light/
+bin/
+obj/
