@@ -2,7 +2,6 @@ using System.Text;
 
 namespace IGP_Soft;
 
-/// <summary>Ajustes simples (clave=valor) guardados junto al ejecutable, para que sea portable.</summary>
 internal static class Config
 {
     public static readonly string FilePath = Path.Combine(AppContext.BaseDirectory, "IGP_Soft.config.txt");
@@ -22,7 +21,7 @@ internal static class Config
                 if (eq > 0) Values[line[..eq].Trim()] = line[(eq + 1)..].Trim();
             }
         }
-        catch { /* se usa lo predeterminado */ }
+        catch { }
     }
 
     public static string? Get(string key) => Values.TryGetValue(key, out string? v) ? v : null;
@@ -38,6 +37,6 @@ internal static class Config
                 sb.AppendLine($"{kv.Key}={kv.Value}");
             File.WriteAllText(FilePath, sb.ToString());
         }
-        catch { /* carpeta de solo lectura */ }
+        catch { }
     }
 }

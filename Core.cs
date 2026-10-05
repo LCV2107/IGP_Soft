@@ -7,16 +7,8 @@ using Microsoft.Win32;
 
 namespace IGP_Soft;
 
-// ---------------------------------------------------------------------------
-//  Enlaces del IGP (orden fijo pedido)
-// ---------------------------------------------------------------------------
-
 internal sealed record LinkDef(string Titulo, string Url);
 
-/// <summary>
-/// Lista de enlaces editable, guardada en un archivo de texto junto al ejecutable
-/// (portable). Formato por línea:  Título | URL
-/// </summary>
 internal static class LinkStore
 {
     public static string FilePath { get; } =
@@ -69,10 +61,9 @@ internal static class LinkStore
             foreach (LinkDef l in Links) sb.AppendLine($"{l.Titulo} | {l.Url}");
             File.WriteAllText(FilePath, sb.ToString());
         }
-        catch { /* carpeta de solo lectura: los cambios no se conservan */ }
+        catch { }
     }
 
-    /// <summary>Reemplaza la lista (normaliza URLs y títulos) y la guarda.</summary>
     public static void Replace(IEnumerable<LinkDef> items)
     {
         var list = new List<LinkDef>();
@@ -86,7 +77,6 @@ internal static class LinkStore
         if (list.Count > 0) { Links = list; Save(); }
     }
 
-    /// <summary>Agrega un enlace al final (título único), guarda y devuelve el guardado.</summary>
     public static LinkDef Add(LinkDef it)
     {
         string url = Normalize(it.Url);
@@ -102,7 +92,7 @@ internal static class LinkStore
         url = url.Trim().Trim('"');
         if (url.Length == 0) return "";
         if (url.Contains("://")) return url;
-        if (LooksLikePath(url)) return url;                 // ruta local: se deja tal cual
+        if (LooksLikePath(url)) return url;
         return "https://" + url;
     }
 
@@ -115,7 +105,7 @@ internal static class LinkStore
     {
         if (!url.Contains("://"))
         {
-            try { string n = Path.GetFileName(url); if (n.Length > 0) return n; } catch { /* ignore */ }
+            try { string n = Path.GetFileName(url); if (n.Length > 0) return n; } catch { }
         }
         try { var u = new Uri(url); return (u.Host + u.AbsolutePath).TrimEnd('/'); }
         catch { return url; }
@@ -131,10 +121,6 @@ internal static class LinkStore
     }
 }
 
-// ---------------------------------------------------------------------------
-//  Navegador
-// ---------------------------------------------------------------------------
-
 internal enum BrowserFamily { Chromium, Firefox }
 
 internal sealed record Browser(string Name, BrowserFamily Family, string ExePath)
@@ -146,7 +132,6 @@ internal static class BrowserLocator
 {
     private static readonly string[] PreferOrder = { "Edge", "Chrome", "Brave", "Firefox", "Opera" };
 
-    /// <summary>Todos los navegadores compatibles instalados, en orden de preferencia.</summary>
     public static List<Browser> InstalledAll()
     {
         var list = new List<Browser>();
@@ -158,7 +143,6 @@ internal static class BrowserLocator
         return list;
     }
 
-    /// <summary>Nombre del navegador predeterminado de Windows si es compatible (o null).</summary>
     public static string? DefaultName() => MapProgId(GetDefaultHttpProgId());
 
     public static Browser? Resolve(out string origen)
@@ -259,15 +243,11 @@ internal static class BrowserLocator
                 if (k?.GetValue(null) is string p && File.Exists(p.Trim('"')))
                     return p.Trim('"');
             }
-            catch { /* ignore */ }
+            catch { }
         }
         return null;
     }
 }
-
-// ---------------------------------------------------------------------------
-//  Perfiles temporales
-// ---------------------------------------------------------------------------
 
 internal static class Profiles
 {
@@ -279,7 +259,7 @@ internal static class Profiles
         foreach (string dir in Directory.EnumerateDirectories(Root))
         {
             try { Directory.Delete(dir, recursive: true); }
-            catch { /* en uso */ }
+            catch { }
         }
     }
 
@@ -293,9 +273,6 @@ internal static class Profiles
         return d;
     }
 
-    // ---- Datos de navegación conservados (cookies, inicios de sesión) ----
-
-    /// <summary>Perfiles que NO se borran: uno por navegador y enlace, junto al ejecutable.</summary>
     public static readonly string KeepRoot = Path.Combine(AppContext.BaseDirectory, "IGP_Soft_Datos");
 
     public static bool KeepData
@@ -307,14 +284,12 @@ internal static class Profiles
     public static bool IsKept(string dir) =>
         dir.StartsWith(KeepRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Carpeta fija para este enlace en este navegador (o null si no se puede crear).
-    /// Un enlace no se abre dos veces a la vez, así que la carpeta nunca la comparten dos ventanas.</summary>
     public static string? KeptDir(string browserName, string url)
     {
         try
         {
             string slug = string.Concat(url.Where(char.IsLetterOrDigit).Take(40));
-            uint h = 2166136261;   // FNV-1a: estable entre ejecuciones (string.GetHashCode no lo es)
+            uint h = 2166136261;
             foreach (char ch in url.ToLowerInvariant()) h = (h ^ ch) * 16777619;
             string d = Path.Combine(KeepRoot, browserName, $"{slug}_{h:x8}");
             Directory.CreateDirectory(d);
@@ -326,13 +301,9 @@ internal static class Profiles
     public static void DeleteKept()
     {
         try { if (Directory.Exists(KeepRoot)) Directory.Delete(KeepRoot, recursive: true); }
-        catch { /* algún navegador aún lo usa */ }
+        catch { }
     }
 }
-
-// ---------------------------------------------------------------------------
-//  Ventana lanzada
-// ---------------------------------------------------------------------------
 
 internal sealed class LaunchedWindow
 {
@@ -346,13 +317,8 @@ internal sealed class LaunchedWindow
     public volatile bool Closed;
 }
 
-// ---------------------------------------------------------------------------
-//  Lanzar / colocar / cerrar ventanas de navegador
-// ---------------------------------------------------------------------------
-
 internal static class ProcessInfo
 {
-    /// <summary>Línea de comandos de un proceso (o null).</summary>
     public static string? CommandLine(int pid)
     {
         try
@@ -361,11 +327,10 @@ internal static class ProcessInfo
                 $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
             foreach (ManagementBaseObject o in s.Get()) return o["CommandLine"] as string;
         }
-        catch { /* WMI no disponible */ }
+        catch { }
         return null;
     }
 
-    /// <summary>PIDs de procesos <paramref name="name"/> cuya línea de comandos contiene <paramref name="needle"/>.</summary>
     public static List<int> ByCommandLineContains(string name, string needle)
     {
         var pids = new List<int>();
@@ -380,12 +345,11 @@ internal static class ProcessInfo
                     pids.Add(Convert.ToInt32(o["ProcessId"]));
             }
         }
-        catch { /* WMI no disponible */ }
+        catch { }
         return pids;
     }
 }
 
-/// <summary>Convierte rutas locales a file:/// y arma envoltorios de pantalla completa para medios.</summary>
 internal static class MediaWrapper
 {
     private static readonly string[] ImgExt =
@@ -402,7 +366,6 @@ internal static class MediaWrapper
         catch { return s; }
     }
 
-    /// <summary>Si el destino es imagen o video, crea view.html a pantalla completa y devuelve su file:/// URL.</summary>
     public static string? Prepare(string target, string dir)
     {
         string ext = ExtensionOf(target).ToLowerInvariant();
@@ -440,28 +403,18 @@ internal static class MediaWrapper
 
 internal static class WindowManager
 {
-    // Serializa los lanzamientos para poder identificar con seguridad la ventana nueva.
     private static readonly object LaunchGate = new();
 
     private static string ToBrowserUrl(string s) => MediaWrapper.ToBrowserUrl(s);
 
-    /// <summary>
-    /// Abre <paramref name="url"/> sin bordes y la coloca en el rectángulo <paramref name="area"/>
-    /// (una pantalla completa o un segmento de ella), en píxeles físicos.
-    /// Devuelve la ventana localizada, o null si no se pudo confirmar.
-    /// </summary>
     public static LaunchedWindow? LaunchAndPlace(Browser browser, string url, Rectangle area, string tag,
         IntPtr parentHwnd = default, bool keepData = false)
     {
         lock (LaunchGate)
         {
             string? kept = keepData ? Profiles.KeptDir(browser.Name, url) : null;
-            // Un perfil fijo puede seguir en uso por un navegador que quedó abierto (p. ej. tras un
-            // cierre inesperado): se cierra antes, si no Firefox se niega a abrir y Chromium reutiliza ese proceso.
             if (kept is not null) KillProfileProcesses(browser.ProcessName, kept);
             string profileDir = kept ?? Profiles.NewDir(tag);
-            // Imágenes / videos: se muestran a pantalla completa con un envoltorio HTML.
-            // Cualquier otra cosa (URL o página local) se abre tal cual.
             url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
             var before = SnapshotWindows(browser.ProcessName);
 
@@ -475,8 +428,6 @@ internal static class WindowManager
             };
             if (browser.Family == BrowserFamily.Chromium)
             {
-                // --app abre el contenido sin pestañas ni barra de direcciones antes
-                // de integrarlo en la superficie contenedora.
                 psi.ArgumentList.Add($"--user-data-dir={profileDir}");
                 psi.ArgumentList.Add("--no-first-run");
                 psi.ArgumentList.Add("--no-default-browser-check");
@@ -489,9 +440,8 @@ internal static class WindowManager
                 psi.ArgumentList.Add($"--window-size={area.Width},{area.Height}");
                 psi.ArgumentList.Add($"--app={url}");
             }
-            else // Firefox
+            else
             {
-                // La barra se oculta con userChrome.css antes de integrar la ventana.
                 WriteFirefoxProfile(profileDir);
                 psi.ArgumentList.Add("-profile");
                 psi.ArgumentList.Add(profileDir);
@@ -505,7 +455,6 @@ internal static class WindowManager
                 Process? started = Process.Start(psi);
                 if (started is not null)
                 {
-                    // Vaciar las salidas para no bloquear al navegador ni heredar handles de consola.
                     started.OutputDataReceived += static (_, _) => { };
                     started.ErrorDataReceived += static (_, _) => { };
                     started.BeginOutputReadLine();
@@ -518,9 +467,6 @@ internal static class WindowManager
                 return null;
             }
 
-            // Localizar la ventana cuyo proceso se lanzó con NUESTRO perfil temporal.
-            // Así nunca se confunde con una ventana que el usuario ya tenía abierta.
-            // La línea de comandos de un PID no cambia: se consulta (WMI, lento) una sola vez por proceso.
             IntPtr hwnd = IntPtr.Zero;
             int pid = 0;
             var ownPid = new Dictionary<int, bool>();
@@ -535,7 +481,7 @@ internal static class WindowManager
                     {
                         string? cl = ProcessInfo.CommandLine(p);
                         ours = cl is not null && cl.Contains(profileDir, StringComparison.OrdinalIgnoreCase);
-                        if (cl is not null) ownPid[p] = ours;   // null: WMI falló, se reintenta
+                        if (cl is not null) ownPid[p] = ours;
                     }
                     if (ours) { hwnd = h; pid = p; break; }
                 }
@@ -547,7 +493,6 @@ internal static class WindowManager
                 return null;
             }
 
-            // Todas las familias sin bordes: así llenan el rectángulo sin dejar ver el escritorio.
             const bool borderless = true;
             var win = new LaunchedWindow
             {
@@ -557,7 +502,6 @@ internal static class WindowManager
             };
 
             PlaceWindow(win);
-            // Reafirmar posición y "sin bordes" unos segundos (la ventana tiende a re-encajar al abrir).
             Task.Run(() =>
             {
                 for (int i = 0; i < 24 && !win.Closed; i++)
@@ -572,7 +516,6 @@ internal static class WindowManager
         }
     }
 
-    /// <summary>Recoloca una ventana ya abierta en un nuevo rectángulo (al re-segmentar).</summary>
     public static void Reposition(LaunchedWindow win, Rectangle area)
     {
         try
@@ -584,10 +527,9 @@ internal static class WindowManager
                     PlaceWindow(win);
             }
         }
-        catch { /* ignore */ }
+        catch { }
     }
 
-    /// <summary>Vuelve a poner la ventana por encima de todo (incl. la barra de tareas).</summary>
     public static void BringToTop(IntPtr hwnd)
     {
         try
@@ -596,24 +538,22 @@ internal static class WindowManager
                 NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
                     NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         }
-        catch { /* ignore */ }
+        catch { }
     }
 
     public static void Close(LaunchedWindow win)
     {
         win.Closed = true;
 
-        // 1) Cierre ordenado.
         try
         {
             if (win.Hwnd != IntPtr.Zero && NativeMethods.IsWindow(win.Hwnd))
                 NativeMethods.PostMessage(win.Hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
         }
-        catch { /* ignore */ }
+        catch { }
 
         Thread.Sleep(900);
 
-        // 2) Forzar el cierre de TODO proceso lanzado con este perfil temporal y limpiar.
         CleanupProfile(win.ProcessName, win.ProfileDir);
     }
 
@@ -622,14 +562,14 @@ internal static class WindowManager
         foreach (int pid in ProcessInfo.ByCommandLineContains(processName, profileDir))
         {
             try { Process.GetProcessById(pid).Kill(entireProcessTree: true); }
-            catch { /* ya terminó */ }
+            catch { }
         }
     }
 
     private static void CleanupProfile(string processName, string profileDir)
     {
         KillProfileProcesses(processName, profileDir);
-        if (Profiles.IsKept(profileDir)) return;   // datos conservados: la carpeta se queda
+        if (Profiles.IsKept(profileDir)) return;
 
         for (int i = 0; i < 5; i++)
         {
@@ -641,8 +581,6 @@ internal static class WindowManager
             catch { Thread.Sleep(400); }
         }
     }
-
-    // --- helpers Win32 -----------------------------------------------------
 
     private static void PlaceWindow(LaunchedWindow win)
     {
@@ -656,7 +594,6 @@ internal static class WindowManager
             bool frameChanged = false;
             if (win.Borderless)
             {
-                // Quita título y borde para que el contenido web llene TODO el rectángulo.
                 long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
                 long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME |
                                     NativeMethods.WS_POPUP);
@@ -674,14 +611,10 @@ internal static class WindowManager
                 frameChanged = true;
             }
 
-            // Embebida y ya en su sitio: no se toca (la vigilancia periódica no debe provocar
-            // re-layouts ni parpadeo en el navegador).
             if (!frameChanged && win.ParentHwnd != IntPtr.Zero &&
                 NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, area))
                 return;
 
-            // Las ventanas embebidas usan coordenadas relativas a la superficie contenedora.
-            // Las ventanas independientes (selftest) conservan el comportamiento anterior.
             uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW;
             if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
             IntPtr order = win.ParentHwnd == IntPtr.Zero ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP;
@@ -689,7 +622,6 @@ internal static class WindowManager
         }
     }
 
-    /// <summary>¿La ventana ocupa exactamente <paramref name="area"/> dentro de su contenedor (sin bordes)?</summary>
     private static bool IsAt(IntPtr hwnd, IntPtr parent, Rectangle area)
     {
         if (!NativeMethods.GetWindowRect(hwnd, out NativeMethods.RECT r) ||
@@ -721,12 +653,10 @@ internal static class WindowManager
                 "user_pref(\"browser.laterrun.enabled\", false);\n" +
                 "user_pref(\"browser.fullscreen.autohide\", false);\n" +
                 "user_pref(\"browser.tabs.warnOnClose\", false);\n" +
-                // Con datos conservados el perfil se reutiliza: sin «¿restaurar la sesión?» tras un cierre forzado.
                 "user_pref(\"browser.sessionstore.resume_from_crash\", false);\n" +
                 "user_pref(\"browser.sessionstore.resume_session_once\", false);\n" +
                 "user_pref(\"browser.startup.page\", 0);\n" +
                 "user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);\n" +
-                // Permitir que view.html (file://) cargue la imagen/video vecino y autoreproduzca.
                 "user_pref(\"security.fileuri.strict_origin_policy\", false);\n" +
                 "user_pref(\"media.autoplay.default\", 0);\n" +
                 "user_pref(\"media.autoplay.blocking_policy\", 0);\n");
@@ -736,7 +666,7 @@ internal static class WindowManager
             File.WriteAllText(Path.Combine(chromeDir, "userChrome.css"),
                 "#navigator-toolbox { visibility: collapse !important; }\n");
         }
-        catch { /* si falla, Firefox abre igual (con su barra) */ }
+        catch { }
     }
 
     private static HashSet<IntPtr> SnapshotWindows(string procName)
@@ -767,7 +697,7 @@ internal static class WindowManager
                 if (string.Equals(pr.ProcessName, procName, StringComparison.OrdinalIgnoreCase))
                     result.Add((hWnd, (int)pid));
             }
-            catch { /* proceso terminó */ }
+            catch { }
 
             return true;
         }, IntPtr.Zero);
@@ -775,10 +705,6 @@ internal static class WindowManager
         return result;
     }
 }
-
-// ---------------------------------------------------------------------------
-//  Monitores
-// ---------------------------------------------------------------------------
 
 internal sealed record MonitorInfo(string DeviceName, int X, int Y, int Width, int Height, bool IsPrimary)
 {
@@ -821,10 +747,6 @@ internal static class MonitorEnumerator
         return int.TryParse(digits, out int n) ? n : int.MaxValue;
     }
 }
-
-// ---------------------------------------------------------------------------
-//  P/Invoke
-// ---------------------------------------------------------------------------
 
 internal static class NativeMethods
 {

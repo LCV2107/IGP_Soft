@@ -1,6 +1,5 @@
 namespace IGP_Soft;
 
-/// <summary>Guardar / abrir / eliminar perfiles de pantallas y elegir qué se abre al iniciar.</summary>
 internal sealed class ProfilesForm : Form
 {
     private readonly Func<string, LayoutProfile> _snapshot;
@@ -10,7 +9,6 @@ internal sealed class ProfilesForm : Form
     private readonly Button _btnOverwrite = new();
     private readonly Button _btnDelete = new();
 
-    /// <summary>Perfil que el usuario eligió abrir (lo aplica el panel al cerrar el diálogo).</summary>
     public LayoutProfile? ToOpen { get; private set; }
 
     public ProfilesForm(Func<string, LayoutProfile> snapshot)
@@ -23,7 +21,7 @@ internal sealed class ProfilesForm : Form
         MinimumSize = new Size(560, 440);
         Font = new Font("Segoe UI", 9f);
         ShowInTaskbar = false;
-        TopMost = true;   // el panel es topmost; sin esto el diálogo queda detrás
+        TopMost = true;
 
         var hint = new Label
         {
@@ -96,7 +94,7 @@ internal sealed class ProfilesForm : Form
         _cboStartup.SelectionChangeCommitted += (_, _) =>
         {
             Startup.Profile = _cboStartup.SelectedIndex <= 0 ? Startup.Nothing : (string)_cboStartup.SelectedItem!;
-            _list.Invalidate();   // mueve la marca «★ al iniciar»
+            _list.Invalidate();
         };
         row.Controls.Add(_cboStartup);
 
@@ -139,8 +137,6 @@ internal sealed class ProfilesForm : Form
         box.Controls.Add(flow);
         return box;
     }
-
-    // ------------------------------------------------------------------ lista
 
     private void RefreshList(string? select = null)
     {
@@ -196,8 +192,6 @@ internal sealed class ProfilesForm : Form
         TextRenderer.DrawText(e.Graphics, detail, Font, new Point(e.Bounds.X + 6, e.Bounds.Y + 20), sub);
         e.DrawFocusRectangle();
     }
-
-    // ------------------------------------------------------------------ acciones
 
     private void OpenSelected()
     {

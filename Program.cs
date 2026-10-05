@@ -24,17 +24,14 @@ internal static class Program
             return;
         }
 
-        // Una sola instancia: si ya hay una, se le avisa para que muestre el panel y se sale.
         _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out bool isNew);
         if (!isNew)
         {
             try { using var ev = EventWaitHandle.OpenExisting(ShowEventName); ev.Set(); }
-            catch { /* la instancia previa quizá está cerrando */ }
+            catch { }
             return;
         }
 
-        // --perfil="Nombre" abre ese perfil al arrancar (útil para accesos directos, uno por perfil);
-        // sin él se usa lo elegido en «Al iniciar».
         string? perfil = args.FirstOrDefault(a => a.StartsWith("--perfil=", StringComparison.OrdinalIgnoreCase))
                              ?["--perfil=".Length..].Trim('"');
 
@@ -44,7 +41,6 @@ internal static class Program
     }
 }
 
-/// <summary>Prueba de consola: abre un enlace por monitor y verifica su ubicación.</summary>
 internal static class SelfTest
 {
     public static void Run(string? extra = null, string? browserName = null)

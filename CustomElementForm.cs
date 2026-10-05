@@ -1,6 +1,5 @@
 namespace IGP_Soft;
 
-/// <summary>Diálogo para abrir un elemento suelto (imagen, video o URL) en un monitor.</summary>
 internal sealed class CustomElementForm : Form
 {
     private readonly TextBox _titulo = new();

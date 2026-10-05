@@ -35,8 +35,8 @@ internal sealed class MainForm : Form
     private readonly Button _btnRefresh = new();
     private readonly Button _btnProfiles = new();
     private ToolStripMenuItem _trayProfiles = null!;
-    private bool _sessionReady;       // hasta restaurar lo del arranque, no se pisa «Última sesión»
-    private bool _applyingProfile;    // mientras se aplica un perfil se guarda una sola vez al final
+    private bool _sessionReady;
+    private bool _applyingProfile;
 
     public MainForm(string startupProfile)
     {
@@ -46,7 +46,7 @@ internal sealed class MainForm : Form
         Size = new Size(980, 600);
         Font = new Font("Segoe UI", 9f);
         BackColor = Color.White;
-        TopMost = false;   // solo se pone encima cuando hay una pared de monitoreo activa
+        TopMost = false;
 
         _browsers = BrowserLocator.InstalledAll();
         string? want = Config.Get("browser") ?? BrowserLocator.DefaultName();
@@ -67,14 +67,12 @@ internal sealed class MainForm : Form
         _previewTimer.Tick += (_, _) =>
         {
             CheckClosedWindows();
-            EnforceWindows();        // ventanas de monitoreo: llenar su zona, sin huecos ni barra de tareas
-            ApplyPanelStacking();    // mantiene el panel accesible sobre las superficies activas
+            EnforceWindows();
+            ApplyPanelStacking();
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
 
-        // Lo de «Al iniciar» (o --perfil) se abre con el panel ya visible, así los
-        // monitores y las superficies están listos.
         Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
 
         FormClosing += (_, e) =>
@@ -99,8 +97,6 @@ internal sealed class MainForm : Form
             _trayIcon?.Dispose();
         };
     }
-
-    // ------------------------------------------------------------------ layout
 
     private void BuildLayout()
     {
@@ -177,8 +173,6 @@ internal sealed class MainForm : Form
         Controls.Add(hint);
         Controls.Add(_info);
     }
-
-    // ------------------------------------------------------------------ bandeja
 
     private void BuildTray()
     {
@@ -276,8 +270,6 @@ internal sealed class MainForm : Form
         Close();
     }
 
-    // ------------------------------------------------------------------ enlaces
-
     private void EditLinks()
     {
         using var f = new LinksForm();
@@ -287,8 +279,6 @@ internal sealed class MainForm : Form
             UpdateInfo();
         }
     }
-
-    // ------------------------------------------------------------------ monitores
 
     private void ReloadMonitors()
     {
@@ -412,8 +402,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    // ------------------------------------------------------------------ vigilancia
-
     private void CheckClosedWindows()
     {
         bool cambio = false;
@@ -435,14 +423,11 @@ internal sealed class MainForm : Form
         if (cambio) UpdateInfo();
     }
 
-    /// <summary>Hay una superficie activa cuando al menos una zona contiene contenido.</summary>
     private bool IsWallActive()
     {
         return _tiles.Any(t => !t.Excluded && t.Segments.Any(s => s.Launched is not null || s.Pending is not null));
     }
 
-    /// <summary>Cada ventana de monitoreo se reafirma en su zona, sin bordes y sobre
-    /// la barra de tareas (para que llene la pantalla sin dejar ver el escritorio).</summary>
     private void EnforceWindows()
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
@@ -453,7 +438,6 @@ internal sealed class MainForm : Form
                     WindowManager.Reposition(s.Launched, ToSurfaceArea(t, s.Area));
     }
 
-    /// <summary>El panel permanece accesible por encima de las superficies activas.</summary>
     private void ApplyPanelStacking()
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
@@ -471,8 +455,6 @@ internal sealed class MainForm : Form
             TopMost = false;
         }
     }
-
-    // ------------------------------------------------------------------ vista previa
 
     private void ClearPreviews()
     {
@@ -550,8 +532,6 @@ internal sealed class MainForm : Form
             BeginInvoke(ReloadMonitors);
     }
 
-    // ------------------------------------------------------------------ menús
-
     private void ShowMonitorMenu(MonitorTile tile)
     {
         var menu = new ContextMenuStrip();
@@ -623,8 +603,6 @@ internal sealed class MainForm : Form
         AssignAndOpen(tile, seg, link);
     }
 
-    // ------------------------------------------------------------------ acciones
-
     private async void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link)
     {
         if (tile.Excluded || seg.Pending is not null || _browser is null) return;
@@ -648,8 +626,6 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // La zona y el enlace quedan reservados mientras el navegador arranca en segundo plano,
-        // así el panel sigue respondiendo y nadie más puede usar ese enlace o esa zona.
         var token = new object();
         seg.Pending = token;
         seg.Link = link;
@@ -672,7 +648,6 @@ internal sealed class MainForm : Form
         catch (Exception ex) { error = ex.Message; }
         finally { _pendingLaunches.Remove(launch); }
 
-        // Mientras tanto la zona pudo cerrarse, re-segmentarse u omitirse, o el monitor desconectarse.
         (MonitorTile? t, Segment? s) = FindPending(token);
         if (IsDisposed || t is null || s is null)
         {
@@ -734,7 +709,7 @@ internal sealed class MainForm : Form
             LinkDef link = LinkStore.Links[i];
             if (s.Link?.Url == link.Url || s.Pending is not null) continue;
             if (_openedUrls.Contains(link.Url)) continue;
-            AssignAndOpen(t, s, link);   // cada apertura corre en segundo plano (se serializan en WindowManager)
+            AssignAndOpen(t, s, link);
         }
     }
 
@@ -775,7 +750,6 @@ internal sealed class MainForm : Form
             Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
         }
-        // Si aún estaba abriéndose, al terminar no encontrará su zona y cerrará la ventana.
         seg.Pending = null;
         if (seg.Link is not null)
         {
@@ -799,8 +773,6 @@ internal sealed class MainForm : Form
         foreach (MonitorTile t in _tiles.ToList()) CloseTileWindows(t);
         CloseAllSurfaces();
     }
-
-    // ------------------------------------------------------------------ superficies
 
     private DisplaySurface EnsureSurface(MonitorTile tile)
     {
@@ -836,9 +808,6 @@ internal sealed class MainForm : Form
         _surfaces.Clear();
     }
 
-    /// <summary>Al salir: espera las aperturas en curso y cierra lo que abran, para no dejar
-    /// navegadores huérfanos (el bucle de mensajes ya no ejecutará sus continuaciones).
-    /// Las superficies deben estar cerradas antes, así SetParent no espera a este hilo.</summary>
     private void CloseInFlightLaunches()
     {
         foreach (Task<LaunchedWindow?> launch in _pendingLaunches.ToList())
@@ -848,7 +817,7 @@ internal sealed class MainForm : Form
                 if (launch.Wait(TimeSpan.FromSeconds(20)) && launch.Result is { } w)
                     WindowManager.Close(w);
             }
-            catch { /* la apertura falló: no hay nada que cerrar */ }
+            catch { }
         }
         _pendingLaunches.Clear();
     }
@@ -881,8 +850,6 @@ internal sealed class MainForm : Form
         SaveLastSession();
     }
 
-    // ------------------------------------------------------------------ perfiles
-
     private void EditProfiles()
     {
         using var f = new ProfilesForm(Snapshot);
@@ -903,7 +870,6 @@ internal sealed class MainForm : Form
             parent.DropDownItems.Add(new ToolStripMenuItem("(no hay perfiles guardados)") { Enabled = false });
     }
 
-    /// <summary>Foto de lo que hay ahora en el panel (las zonas «abriendo…» cuentan como asignadas).</summary>
     private LayoutProfile Snapshot(string name) => new()
     {
         Name = name,
@@ -922,8 +888,6 @@ internal sealed class MainForm : Form
         }).ToList(),
     };
 
-    /// <summary>Guarda el estado actual como «Última sesión». Solo se llama tras acciones del
-    /// usuario: si una ventana se cierra sola (o Windows apaga el navegador) la sesión no se pierde.</summary>
     private void SaveLastSession()
     {
         if (!_sessionReady || _applyingProfile) return;
@@ -939,14 +903,12 @@ internal sealed class MainForm : Form
         if (p is not null && p.LinkCount > 0 && _browser is not null)
         {
             ApplyProfile(p);
-            HideToTray();   // pared de monitoreo desatendida: el panel no queda encima del contenido
+            HideToTray();
         }
         _sessionReady = true;
         if (p is not null) SaveLastSession();
     }
 
-    /// <summary>Deja los monitores como en el perfil: zonas, pantallas omitidas y enlaces.
-    /// Lo que ya está abierto en su sitio no se toca.</summary>
     private void ApplyProfile(LayoutProfile p)
     {
         if (p.Browser is not null && !p.Browser.Equals(_browser?.Name, StringComparison.OrdinalIgnoreCase) &&
@@ -954,7 +916,6 @@ internal sealed class MainForm : Form
             _cboBrowser.SelectedItem = _browsers.First(b => b.Name.Equals(p.Browser, StringComparison.OrdinalIgnoreCase)).Name;
         if (_browser is null) return;
 
-        // Cada monitor guardado se busca por su nombre de dispositivo y, si cambió, por su número.
         var plan = new List<(MonitorTile Tile, MonitorLayout Layout)>();
         var used = new HashSet<MonitorTile>();
         foreach (MonitorLayout ml in p.Monitors)
@@ -968,7 +929,6 @@ internal sealed class MainForm : Form
         _applyingProfile = true;
         try
         {
-            // Monitores que el perfil no conoce: se vacían, así no retienen enlaces que el perfil quiere en otro lado.
             foreach (MonitorTile t in _tiles.Where(t => !used.Contains(t))) CloseTileWindows(t);
 
             var wanted = new List<(MonitorTile Tile, Segment Seg, LinkDef Link)>();
@@ -988,7 +948,6 @@ internal sealed class MainForm : Form
                           ?? new LinkDef(z.Titulo, z.Url);
                     if (s.Link?.Url.Equals(link?.Url, StringComparison.OrdinalIgnoreCase) == true) continue;
 
-                    // Primero se libera todo lo que cambia; luego se abre (un enlace puede pasar de una zona a otra).
                     if (s.Link is not null || s.Launched is not null || s.Pending is not null) CloseSeg(t, s);
                     if (link is not null) wanted.Add((t, s, link));
                 }
@@ -1003,8 +962,6 @@ internal sealed class MainForm : Form
         UpdateInfo();
         SaveLastSession();
     }
-
-    // ------------------------------------------------------------------ identificar
 
     private void IdentifyMonitors()
     {
@@ -1053,8 +1010,6 @@ internal sealed class MainForm : Form
         _identifyForms.Clear();
     }
 
-    // ------------------------------------------------------------------ superficie + segmento + tile
-
     private sealed class DisplaySurface : Form
     {
         public DisplaySurface(MonitorInfo monitor)
@@ -1084,11 +1039,11 @@ internal sealed class MainForm : Form
     internal sealed class Segment
     {
         public int Index;
-        public Rectangle Area;        // píxeles físicos del monitor
-        public RectangleF TileRect;   // dentro del cuadro del panel
+        public Rectangle Area;
+        public RectangleF TileRect;
         public LinkDef? Link;
         public LaunchedWindow? Launched;
-        public object? Pending;       // token mientras el navegador se está abriendo
+        public object? Pending;
     }
 
     private sealed class MonitorTile : Panel
@@ -1218,7 +1173,6 @@ internal sealed class MainForm : Form
                 g.FillRectangle(bg, full);
             }
 
-            // Líneas de segmentación.
             if (!Excluded && SegCount > 1)
             {
                 (int cols, int rows) = Grid(SegCount);
@@ -1229,7 +1183,6 @@ internal sealed class MainForm : Form
                 for (int r = 1; r < rows; r++) { g.DrawLine(dark, 0, r * sh, Width, r * sh); g.DrawLine(light, 0, r * sh + 1, Width, r * sh + 1); }
             }
 
-            // Estado por zona.
             if (!Excluded)
             {
                 using var sf = new Font("Segoe UI", 7.5f);
@@ -1248,7 +1201,6 @@ internal sealed class MainForm : Form
                 }
             }
 
-            // Borde.
             Color border = Excluded ? Color.FromArgb(170, 170, 170)
                          : Segments.Any(s => s.Link is not null) ? Color.SeaGreen
                          : _hover ? Color.FromArgb(0, 120, 215)
@@ -1259,14 +1211,12 @@ internal sealed class MainForm : Form
                 g.DrawRectangle(pen, full);
             }
 
-            // Número (arriba-izquierda).
             var pill = new Rectangle(5, 5, 30, 20);
             using (var pb = new SolidBrush(Color.FromArgb(preview ? 160 : 95, 0, 0, 0)))
                 g.FillRectangle(pb, pill);
             using (var nf = new Font("Segoe UI", 10f, FontStyle.Bold))
                 TextRenderer.DrawText(g, Monitor.IsPrimary ? Number + "★" : Number.ToString(), nf, pill, Color.White, C);
 
-            // Control  − n +  (arriba-derecha).
             if (!Excluded)
             {
                 const int w = 66, h = 20;

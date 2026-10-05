@@ -4,10 +4,6 @@ using Microsoft.Win32;
 
 namespace IGP_Soft;
 
-// ---------------------------------------------------------------------------
-//  Perfiles de pantallas: qué enlace va en cada zona de cada monitor
-// ---------------------------------------------------------------------------
-
 internal sealed class ZoneLayout
 {
     public int Zone { get; set; }
@@ -17,8 +13,8 @@ internal sealed class ZoneLayout
 
 internal sealed class MonitorLayout
 {
-    public int Number { get; set; }               // 1, 2, 3… según el orden del panel
-    public string Device { get; set; } = "";      // \\.\DISPLAY1
+    public int Number { get; set; }
+    public string Device { get; set; } = "";
     public bool Primary { get; set; }
     public bool Excluded { get; set; }
     public int Zones { get; set; } = 1;
@@ -35,8 +31,6 @@ internal sealed class LayoutProfile
     public int LinkCount => Monitors.Where(m => !m.Excluded).Sum(m => m.Links.Count);
 }
 
-/// <summary>Perfiles guardados en un JSON junto al ejecutable (portable).
-/// «Última sesión» es un perfil más, que el panel actualiza solo.</summary>
 internal static class ProfileStore
 {
     public const string LastSession = "Última sesión";
@@ -46,12 +40,11 @@ internal static class ProfileStore
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,   // tildes legibles en el archivo
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     public static List<LayoutProfile> Items { get; private set; } = new();
 
-    /// <summary>Perfiles con nombre (sin «Última sesión»), en orden alfabético.</summary>
     public static IEnumerable<LayoutProfile> Named =>
         Items.Where(p => !IsLastSession(p.Name)).OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase);
 
@@ -72,7 +65,6 @@ internal static class ProfileStore
         string.IsNullOrWhiteSpace(name) ? null
         : Items.FirstOrDefault(p => string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Agrega o reemplaza (por nombre) y guarda.</summary>
     public static void Put(LayoutProfile profile)
     {
         profile.Name = profile.Name.Trim();
@@ -90,28 +82,23 @@ internal static class ProfileStore
     {
         try
         {
-            // Escritura atómica: un corte de luz no deja el archivo a medias.
             string tmp = FilePath + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(Items, Json));
             File.Move(tmp, FilePath, overwrite: true);
         }
-        catch { /* carpeta de solo lectura: los perfiles no se conservan */ }
+        catch { }
     }
 }
 
-/// <summary>Qué se abre al arrancar el programa (se guarda en IGP_Soft.config.txt).</summary>
 internal static class Startup
 {
     public const string Nothing = "";
 
-    /// <summary>"" = nada · «Última sesión» · nombre de un perfil.</summary>
     public static string Profile
     {
         get => Config.Get("alIniciar") ?? Nothing;
         set => Config.Set("alIniciar", value);
     }
-
-    // ---- Iniciar con Windows (solo si el usuario lo activa: entrada en HKCU\...\Run) ----
 
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValue = "IGP_Soft";
@@ -135,7 +122,7 @@ internal static class Startup
                 if (value) k.SetValue(RunValue, $"\"{Environment.ProcessPath}\" --inicio-windows");
                 else k.DeleteValue(RunValue, throwOnMissingValue: false);
             }
-            catch { /* sin permisos: queda como estaba */ }
+            catch { }
         }
     }
 }

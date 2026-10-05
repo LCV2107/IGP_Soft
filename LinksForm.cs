@@ -1,6 +1,5 @@
 namespace IGP_Soft;
 
-/// <summary>Editor de la lista de enlaces (se guarda junto al ejecutable).</summary>
 internal sealed class LinksForm : Form
 {
     private readonly DataGridView _grid = new();
@@ -13,7 +12,7 @@ internal sealed class LinksForm : Form
         MinimumSize = new Size(560, 320);
         Font = new Font("Segoe UI", 9f);
         ShowInTaskbar = false;
-        TopMost = true;   // el panel es topmost; sin esto el diálogo queda detrás
+        TopMost = true;
 
         var hint = new Label
         {
