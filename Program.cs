@@ -14,6 +14,7 @@ internal static class Program
     {
         LinkStore.Load();
         Config.Load();
+        ProfileStore.Load();
 
         if (args.Contains("--selftest", StringComparer.OrdinalIgnoreCase))
         {
@@ -32,8 +33,13 @@ internal static class Program
             return;
         }
 
+        // --perfil="Nombre" abre ese perfil al arrancar (útil para accesos directos, uno por perfil);
+        // sin él se usa lo elegido en «Al iniciar».
+        string? perfil = args.FirstOrDefault(a => a.StartsWith("--perfil=", StringComparison.OrdinalIgnoreCase))
+                             ?["--perfil=".Length..].Trim('"');
+
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        Application.Run(new MainForm(perfil ?? Startup.Profile));
         GC.KeepAlive(_instanceMutex);
     }
 }

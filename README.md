@@ -21,8 +21,36 @@ pantalla completa, eligiendo tú qué enlace va en qué monitor.
 - `IGP_Soft.exe` no necesita instalación ni .NET: se puede llevar en USB.
 - La **lista de enlaces** se guarda en `IGP_Soft.enlaces.txt`, en la misma carpeta
   que el `.exe` (se crea solo la primera vez con los 4 enlaces del IGP).
-- No escribe nada en el registro ni en AppData. Los perfiles temporales del
-  navegador viven en `%TEMP%` y se borran al reiniciar el programa.
+- Los **perfiles de pantallas** se guardan en `IGP_Soft.perfiles.json`, junto al `.exe`.
+- No escribe nada en el registro ni en AppData (salvo que se active «Iniciar con
+  Windows»). Los perfiles temporales del navegador viven en `%TEMP%` y se borran
+  al reiniciar el programa.
+
+## Perfiles y última sesión
+
+Botón **Perfiles…** (también en el menú de la bandeja: *Abrir perfil*):
+
+- Un **perfil** recuerda, por monitor, en cuántas zonas está dividido, si está
+  omitido y qué enlace va en cada zona (y el navegador usado).
+  **Guardar pantallas actuales…** crea uno con nombre; **Abrir ahora** lo aplica
+  (lo que ya está en su sitio no se reabre).
+- **Última sesión** se actualiza sola con cada cambio que haces en el panel. Si una
+  ventana se cierra sola, o Windows apaga el navegador, la sesión **no** se pierde.
+- **Al iniciar el programa, abrir:** nada, *Última sesión* o un perfil. Al abrir
+  algo automáticamente, el panel se oculta en la bandeja para no tapar la pared.
+- **Iniciar IGP_Soft al encender Windows**: agrega una entrada en
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (se quita al desmarcar).
+- Los monitores se reconocen por su nombre de Windows (`\\.\DISPLAY1`) y, si cambió,
+  por su número en el panel.
+- Para un acceso directo por perfil: `IGP_Soft.exe --perfil="Nombre del perfil"`
+  (tiene prioridad sobre «Al iniciar»).
+
+### Conservar datos de navegación
+
+En el mismo diálogo, **Conservar datos de navegación (cookies, inicios de sesión)**
+hace que cada enlace use un perfil de navegador **fijo** en `IGP_Soft_Datos\<navegador>\`
+(junto al `.exe`) en lugar de uno temporal: si una página pide iniciar sesión, basta
+hacerlo una vez. **Borrar datos guardados** elimina esa carpeta.
 
 ## Cómo funciona
 
@@ -89,7 +117,7 @@ instalados (**Firefox, Chrome, Edge, Brave, Opera**). Por defecto se marca el
 Si no hay ninguno instalado, el panel muestra un error y no deja abrir pantallas.
 
 Cada pantalla usa un **perfil temporal y aislado** en `%TEMP%\IGP_Soft_Profiles\`
-(no requiere cuentas ni credenciales). Los perfiles de sesiones anteriores se
+(no requiere cuentas ni credenciales). Los perfiles temporales de sesiones anteriores se
 borran al iniciar el programa.
 
 ### Modo pantalla

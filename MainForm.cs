@@ -33,8 +33,12 @@ internal sealed class MainForm : Form
     private readonly Button _btnIdentify = new();
     private readonly Button _btnCloseAll = new();
     private readonly Button _btnRefresh = new();
+    private readonly Button _btnProfiles = new();
+    private ToolStripMenuItem _trayProfiles = null!;
+    private bool _sessionReady;       // hasta restaurar lo del arranque, no se pisa «Última sesión»
+    private bool _applyingProfile;    // mientras se aplica un perfil se guarda una sola vez al final
 
-    public MainForm()
+    public MainForm(string startupProfile)
     {
         Text = "IGP_Soft — Pantallas de monitoreo IGP";
         StartPosition = FormStartPosition.CenterScreen;
@@ -68,6 +72,10 @@ internal sealed class MainForm : Form
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
+
+        // Lo de «Al iniciar» (o --perfil) se abre con el panel ya visible, así los
+        // monitores y las superficies están listos.
+        Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
 
         FormClosing += (_, e) =>
         {
@@ -136,25 +144,27 @@ internal sealed class MainForm : Form
         _chkSkipPrimary.Text = "Omitir la pantalla principal (laptop)";
         _chkSkipPrimary.AutoSize = true;
         _chkSkipPrimary.Margin = new Padding(0, 6, 16, 10);
-        _chkSkipPrimary.CheckedChanged += (_, _) => { _skipPrimaryTouched = true; ApplySkipPrimary(); };
+        _chkSkipPrimary.CheckedChanged += (_, _) => { _skipPrimaryTouched = true; ApplySkipPrimary(); SaveLastSession(); };
 
         _btnAuto.Text = "Abrir en orden";
         _btnLinks.Text = "Enlaces…";
         _btnIdentify.Text = "Identificar monitores";
         _btnCloseAll.Text = "Cerrar todas las ventanas";
         _btnRefresh.Text = "Actualizar";
-        foreach (Button b in new[] { _btnAuto, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh })
+        _btnProfiles.Text = "Perfiles…";
+        foreach (Button b in new[] { _btnAuto, _btnProfiles, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh })
         {
             b.AutoSize = true;
             b.Padding = new Padding(10, 4, 10, 4);
             b.Margin = new Padding(0, 0, 8, 0);
         }
         _btnAuto.Click += (_, _) => AutoAssignInOrder();
+        _btnProfiles.Click += (_, _) => EditProfiles();
         _btnLinks.Click += (_, _) => EditLinks();
         _btnIdentify.Click += (_, _) => IdentifyMonitors();
         _btnCloseAll.Click += (_, _) => CloseAll();
         _btnRefresh.Click += (_, _) => ReloadMonitors();
-        bottom.Controls.AddRange(new Control[] { lblBrowser, _cboBrowser, _chkPreview, _chkSkipPrimary, _btnAuto, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh });
+        bottom.Controls.AddRange(new Control[] { lblBrowser, _cboBrowser, _chkPreview, _chkSkipPrimary, _btnAuto, _btnProfiles, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh });
         bottom.SetFlowBreak(_chkSkipPrimary, true);
 
         _canvas.Dock = DockStyle.Fill;
@@ -178,6 +188,9 @@ internal sealed class MainForm : Form
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Abrir panel", null, (_, _) => ShowFromTray()) { Font = new Font(Font, FontStyle.Bold) });
         menu.Items.Add(new ToolStripSeparator());
+        _trayProfiles = new ToolStripMenuItem("Abrir perfil");
+        menu.Items.Add(_trayProfiles);
+        menu.Opening += (_, _) => FillProfileMenu(_trayProfiles);
         menu.Items.Add(new ToolStripMenuItem("Cerrar todas las ventanas", null, (_, _) => CloseAll()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Salir", null, (_, _) => ExitApp()));
@@ -572,7 +585,7 @@ internal sealed class MainForm : Form
         if (seg.Launched is not null || seg.Pending is not null)
         {
             var cerrar = new ToolStripMenuItem(seg.Pending is not null ? "✖  Cancelar apertura" : "✖  Cerrar esta ventana");
-            cerrar.Click += (_, _) => CloseSeg(tile, seg);
+            cerrar.Click += (_, _) => { CloseSeg(tile, seg); SaveLastSession(); };
             menu.Items.Add(cerrar);
             menu.Items.Add(new ToolStripSeparator());
         }
@@ -643,13 +656,15 @@ internal sealed class MainForm : Form
         _openedUrls.Add(link.Url);
         tile.Invalidate();
         UpdateInfo();
+        SaveLastSession();
 
         Browser browser = _browser;
+        bool keepData = Profiles.KeepData;
         Rectangle area = ToSurfaceArea(tile, seg.Area);
         string tag = $"{tile.Monitor.ShortName}-{seg.Index}";
         IntPtr parent = surface.Handle;
 
-        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, link.Url, area, tag, parent));
+        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, link.Url, area, tag, parent, keepData));
         _pendingLaunches.Add(launch);
         LaunchedWindow? win = null;
         string? error = null;
@@ -729,7 +744,13 @@ internal sealed class MainForm : Form
         int next = Math.Clamp(idx + delta, 0, MonitorTile.Steps.Length - 1);
         if (next == idx) return;
 
-        int newCount = MonitorTile.Steps[next];
+        SetSegCount(tile, MonitorTile.Steps[next]);
+        SaveLastSession();
+    }
+
+    private void SetSegCount(MonitorTile tile, int newCount)
+    {
+        if (newCount == tile.SegCount) return;
 
         if (newCount < tile.Segments.Count)
             for (int k = newCount; k < tile.Segments.Count; k++)
@@ -841,6 +862,7 @@ internal sealed class MainForm : Form
             return;
         }
         CloseAllWindows();
+        SaveLastSession();
     }
 
     private void ToggleExcluded(MonitorTile tile)
@@ -856,6 +878,130 @@ internal sealed class MainForm : Form
         }
         tile.Invalidate();
         UpdateInfo();
+        SaveLastSession();
+    }
+
+    // ------------------------------------------------------------------ perfiles
+
+    private void EditProfiles()
+    {
+        using var f = new ProfilesForm(Snapshot);
+        f.ShowDialog(this);
+        if (f.ToOpen is not null) ApplyProfile(f.ToOpen);
+    }
+
+    private void FillProfileMenu(ToolStripMenuItem parent)
+    {
+        parent.DropDownItems.Clear();
+        foreach (LayoutProfile p in ProfileStore.Get(ProfileStore.LastSession) is { } last
+                     ? ProfileStore.Named.Prepend(last) : ProfileStore.Named)
+        {
+            LayoutProfile captured = p;
+            parent.DropDownItems.Add(new ToolStripMenuItem(p.Name, null, (_, _) => ApplyProfile(captured)));
+        }
+        if (parent.DropDownItems.Count == 0)
+            parent.DropDownItems.Add(new ToolStripMenuItem("(no hay perfiles guardados)") { Enabled = false });
+    }
+
+    /// <summary>Foto de lo que hay ahora en el panel (las zonas «abriendo…» cuentan como asignadas).</summary>
+    private LayoutProfile Snapshot(string name) => new()
+    {
+        Name = name,
+        Browser = _browser?.Name,
+        Saved = DateTime.Now,
+        Monitors = _tiles.Select(t => new MonitorLayout
+        {
+            Number = t.Number,
+            Device = t.Monitor.DeviceName,
+            Primary = t.Monitor.IsPrimary,
+            Excluded = t.Excluded,
+            Zones = t.SegCount,
+            Links = t.Segments.Where(s => s.Link is not null)
+                              .Select(s => new ZoneLayout { Zone = s.Index, Titulo = s.Link!.Titulo, Url = s.Link.Url })
+                              .ToList(),
+        }).ToList(),
+    };
+
+    /// <summary>Guarda el estado actual como «Última sesión». Solo se llama tras acciones del
+    /// usuario: si una ventana se cierra sola (o Windows apaga el navegador) la sesión no se pierde.</summary>
+    private void SaveLastSession()
+    {
+        if (!_sessionReady || _applyingProfile) return;
+        ProfileStore.Put(Snapshot(ProfileStore.LastSession));
+    }
+
+    private void RunStartupProfile(string name)
+    {
+        LayoutProfile? p = ProfileStore.Get(name);
+        if (p is null && !string.IsNullOrWhiteSpace(name) && !ProfileStore.IsLastSession(name))
+            _tray.ShowBalloonTip(4000, "IGP_Soft", $"No existe el perfil «{name}».", ToolTipIcon.Warning);
+
+        if (p is not null && p.LinkCount > 0 && _browser is not null)
+        {
+            ApplyProfile(p);
+            HideToTray();   // pared de monitoreo desatendida: el panel no queda encima del contenido
+        }
+        _sessionReady = true;
+        if (p is not null) SaveLastSession();
+    }
+
+    /// <summary>Deja los monitores como en el perfil: zonas, pantallas omitidas y enlaces.
+    /// Lo que ya está abierto en su sitio no se toca.</summary>
+    private void ApplyProfile(LayoutProfile p)
+    {
+        if (p.Browser is not null && !p.Browser.Equals(_browser?.Name, StringComparison.OrdinalIgnoreCase) &&
+            _browsers.Any(b => b.Name.Equals(p.Browser, StringComparison.OrdinalIgnoreCase)))
+            _cboBrowser.SelectedItem = _browsers.First(b => b.Name.Equals(p.Browser, StringComparison.OrdinalIgnoreCase)).Name;
+        if (_browser is null) return;
+
+        // Cada monitor guardado se busca por su nombre de dispositivo y, si cambió, por su número.
+        var plan = new List<(MonitorTile Tile, MonitorLayout Layout)>();
+        var used = new HashSet<MonitorTile>();
+        foreach (MonitorLayout ml in p.Monitors)
+            if (_tiles.FirstOrDefault(t => !used.Contains(t) &&
+                    t.Monitor.DeviceName.Equals(ml.Device, StringComparison.OrdinalIgnoreCase)) is { } t)
+            { used.Add(t); plan.Add((t, ml)); }
+        foreach (MonitorLayout ml in p.Monitors.Where(ml => plan.All(x => x.Layout != ml)))
+            if (_tiles.FirstOrDefault(t => !used.Contains(t) && t.Number == ml.Number) is { } t)
+            { used.Add(t); plan.Add((t, ml)); }
+
+        _applyingProfile = true;
+        try
+        {
+            // Monitores que el perfil no conoce: se vacían, así no retienen enlaces que el perfil quiere en otro lado.
+            foreach (MonitorTile t in _tiles.Where(t => !used.Contains(t))) CloseTileWindows(t);
+
+            var wanted = new List<(MonitorTile Tile, Segment Seg, LinkDef Link)>();
+            foreach ((MonitorTile t, MonitorLayout ml) in plan)
+            {
+                if (t.Excluded != ml.Excluded) ToggleExcluded(t);
+                if (t.Excluded) continue;
+
+                int zones = MonitorTile.Steps.FirstOrDefault(n => n >= ml.Zones, MonitorTile.Steps[^1]);
+                SetSegCount(t, zones);
+
+                foreach (Segment s in t.Segments)
+                {
+                    ZoneLayout? z = ml.Links.FirstOrDefault(l => l.Zone == s.Index);
+                    LinkDef? link = z is null ? null
+                        : LinkStore.Links.FirstOrDefault(l => l.Url.Equals(z.Url, StringComparison.OrdinalIgnoreCase))
+                          ?? new LinkDef(z.Titulo, z.Url);
+                    if (s.Link?.Url.Equals(link?.Url, StringComparison.OrdinalIgnoreCase) == true) continue;
+
+                    // Primero se libera todo lo que cambia; luego se abre (un enlace puede pasar de una zona a otra).
+                    if (s.Link is not null || s.Launched is not null || s.Pending is not null) CloseSeg(t, s);
+                    if (link is not null) wanted.Add((t, s, link));
+                }
+            }
+
+            foreach ((MonitorTile t, Segment s, LinkDef link) in wanted)
+                if (!_openedUrls.Contains(link.Url))
+                    AssignAndOpen(t, s, link);
+        }
+        finally { _applyingProfile = false; }
+
+        UpdateInfo();
+        SaveLastSession();
     }
 
     // ------------------------------------------------------------------ identificar

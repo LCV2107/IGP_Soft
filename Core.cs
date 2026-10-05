@@ -292,6 +292,42 @@ internal static class Profiles
         Directory.CreateDirectory(d);
         return d;
     }
+
+    // ---- Datos de navegación conservados (cookies, inicios de sesión) ----
+
+    /// <summary>Perfiles que NO se borran: uno por navegador y enlace, junto al ejecutable.</summary>
+    public static readonly string KeepRoot = Path.Combine(AppContext.BaseDirectory, "IGP_Soft_Datos");
+
+    public static bool KeepData
+    {
+        get => Config.Get("conservarDatos") == "1";
+        set => Config.Set("conservarDatos", value ? "1" : "0");
+    }
+
+    public static bool IsKept(string dir) =>
+        dir.StartsWith(KeepRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Carpeta fija para este enlace en este navegador (o null si no se puede crear).
+    /// Un enlace no se abre dos veces a la vez, así que la carpeta nunca la comparten dos ventanas.</summary>
+    public static string? KeptDir(string browserName, string url)
+    {
+        try
+        {
+            string slug = string.Concat(url.Where(char.IsLetterOrDigit).Take(40));
+            uint h = 2166136261;   // FNV-1a: estable entre ejecuciones (string.GetHashCode no lo es)
+            foreach (char ch in url.ToLowerInvariant()) h = (h ^ ch) * 16777619;
+            string d = Path.Combine(KeepRoot, browserName, $"{slug}_{h:x8}");
+            Directory.CreateDirectory(d);
+            return d;
+        }
+        catch { return null; }
+    }
+
+    public static void DeleteKept()
+    {
+        try { if (Directory.Exists(KeepRoot)) Directory.Delete(KeepRoot, recursive: true); }
+        catch { /* algún navegador aún lo usa */ }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,11 +451,15 @@ internal static class WindowManager
     /// Devuelve la ventana localizada, o null si no se pudo confirmar.
     /// </summary>
     public static LaunchedWindow? LaunchAndPlace(Browser browser, string url, Rectangle area, string tag,
-        IntPtr parentHwnd = default)
+        IntPtr parentHwnd = default, bool keepData = false)
     {
         lock (LaunchGate)
         {
-            string profileDir = Profiles.NewDir(tag);
+            string? kept = keepData ? Profiles.KeptDir(browser.Name, url) : null;
+            // Un perfil fijo puede seguir en uso por un navegador que quedó abierto (p. ej. tras un
+            // cierre inesperado): se cierra antes, si no Firefox se niega a abrir y Chromium reutiliza ese proceso.
+            if (kept is not null) KillProfileProcesses(browser.ProcessName, kept);
+            string profileDir = kept ?? Profiles.NewDir(tag);
             // Imágenes / videos: se muestran a pantalla completa con un envoltorio HTML.
             // Cualquier otra cosa (URL o página local) se abre tal cual.
             url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
@@ -441,6 +481,7 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--no-first-run");
                 psi.ArgumentList.Add("--no-default-browser-check");
                 psi.ArgumentList.Add("--disable-session-crashed-bubble");
+                psi.ArgumentList.Add("--hide-crash-restore-bubble");
                 psi.ArgumentList.Add("--disable-infobars");
                 psi.ArgumentList.Add("--disable-features=Translate");
                 psi.ArgumentList.Add("--disable-search-engine-choice-screen");
@@ -576,13 +617,19 @@ internal static class WindowManager
         CleanupProfile(win.ProcessName, win.ProfileDir);
     }
 
-    private static void CleanupProfile(string processName, string profileDir)
+    private static void KillProfileProcesses(string processName, string profileDir)
     {
         foreach (int pid in ProcessInfo.ByCommandLineContains(processName, profileDir))
         {
             try { Process.GetProcessById(pid).Kill(entireProcessTree: true); }
             catch { /* ya terminó */ }
         }
+    }
+
+    private static void CleanupProfile(string processName, string profileDir)
+    {
+        KillProfileProcesses(processName, profileDir);
+        if (Profiles.IsKept(profileDir)) return;   // datos conservados: la carpeta se queda
 
         for (int i = 0; i < 5; i++)
         {
@@ -674,6 +721,10 @@ internal static class WindowManager
                 "user_pref(\"browser.laterrun.enabled\", false);\n" +
                 "user_pref(\"browser.fullscreen.autohide\", false);\n" +
                 "user_pref(\"browser.tabs.warnOnClose\", false);\n" +
+                // Con datos conservados el perfil se reutiliza: sin «¿restaurar la sesión?» tras un cierre forzado.
+                "user_pref(\"browser.sessionstore.resume_from_crash\", false);\n" +
+                "user_pref(\"browser.sessionstore.resume_session_once\", false);\n" +
+                "user_pref(\"browser.startup.page\", 0);\n" +
                 "user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);\n" +
                 // Permitir que view.html (file://) cargue la imagen/video vecino y autoreproduzca.
                 "user_pref(\"security.fileuri.strict_origin_policy\", false);\n" +
