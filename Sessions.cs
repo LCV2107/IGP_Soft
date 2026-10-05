@@ -28,6 +28,7 @@ internal sealed class LayoutProfile
     public DateTime Saved { get; set; }
     public List<MonitorLayout> Monitors { get; set; } = new();
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public int LinkCount => Monitors.Where(m => !m.Excluded).Sum(m => m.Links.Count);
 }
 

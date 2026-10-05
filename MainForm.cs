@@ -72,6 +72,7 @@ internal sealed class MainForm : Form
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
+        WindowWatcher.Start(OnWindowMoved);
 
         Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
 
@@ -86,6 +87,7 @@ internal sealed class MainForm : Form
         FormClosed += (_, _) =>
         {
             _previewTimer.Stop();
+            WindowWatcher.Stop();
             _showReg?.Unregister(null);
             _showEvent?.Dispose();
             CloseIdentifyForms();
@@ -255,7 +257,8 @@ internal sealed class MainForm : Form
         if (_tiles.Any(t => t.Segments.Any(s => s.Launched is not null || s.Pending is not null)))
         {
             DialogResult r = MessageBox.Show(this,
-                "Al salir se cerrarán las pantallas de monitoreo y su contenido. ¿Desea continuar?",
+                "Al salir se cerrarán las pantallas de monitoreo y su contenido " +
+                "(las ventanas adjuntas vuelven al escritorio, no se cierran). ¿Desea continuar?",
                 "Salir de IGP_Soft", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
 
@@ -428,6 +431,18 @@ internal sealed class MainForm : Form
         return _tiles.Any(t => !t.Excluded && t.Segments.Any(s => s.Launched is not null || s.Pending is not null));
     }
 
+    private void OnWindowMoved(IntPtr hwnd)
+    {
+        if (_identifyForms.Any(f => !f.IsDisposed)) return;
+        foreach (MonitorTile t in _tiles)
+            foreach (Segment s in t.Segments)
+                if (s.Launched is { } w && w.Hwnd == hwnd)
+                {
+                    WindowManager.Reposition(w, ToSurfaceArea(t, s.Area));
+                    return;
+                }
+    }
+
     private void EnforceWindows()
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
@@ -564,7 +579,10 @@ internal sealed class MainForm : Form
 
         if (seg.Launched is not null || seg.Pending is not null)
         {
-            var cerrar = new ToolStripMenuItem(seg.Pending is not null ? "✖  Cancelar apertura" : "✖  Cerrar esta ventana");
+            var cerrar = new ToolStripMenuItem(
+                seg.Pending is not null ? "✖  Cancelar apertura"
+                : seg.Launched?.Attached == true ? "↩  Soltar ventana (devolverla al escritorio)"
+                : "✖  Cerrar esta ventana");
             cerrar.Click += (_, _) => { CloseSeg(tile, seg); SaveLastSession(); };
             menu.Items.Add(cerrar);
             menu.Items.Add(new ToolStripSeparator());
@@ -589,8 +607,29 @@ internal sealed class MainForm : Form
         var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…") { Enabled = seg.Pending is null };
         custom.Click += (_, _) => AddCustomElement(tile, seg);
         menu.Items.Add(custom);
+        menu.Items.Add(BuildAttachMenu(tile, seg));
 
         menu.Show(Cursor.Position);
+    }
+
+    private ToolStripMenuItem BuildAttachMenu(MonitorTile tile, Segment seg)
+    {
+        var attach = new ToolStripMenuItem("▣  Adjuntar ventana abierta") { Enabled = seg.Pending is null };
+        foreach (OpenWindow w in WindowManager.ListOpenWindows())
+        {
+            string spec = WindowManager.SpecOf(w);
+            string title = w.Title.Length > 70 ? w.Title[..67] + "…" : w.Title;
+            var item = new ToolStripMenuItem($"{title}   — {w.ProcessName}".Replace("&", "&&"))
+            {
+                Enabled = !_openedUrls.Contains(spec),
+            };
+            OpenWindow captured = w;
+            item.Click += (_, _) => AssignAndOpen(tile, seg, new LinkDef("▣ " + captured.Title, spec));
+            attach.DropDownItems.Add(item);
+        }
+        if (attach.DropDownItems.Count == 0)
+            attach.DropDownItems.Add(new ToolStripMenuItem("(no hay ventanas disponibles)") { Enabled = false });
+        return attach;
     }
 
     private void AddCustomElement(MonitorTile tile, Segment seg)
@@ -603,9 +642,10 @@ internal sealed class MainForm : Form
         AssignAndOpen(tile, seg, link);
     }
 
-    private async void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link)
+    private async void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link, bool quiet = false)
     {
-        if (tile.Excluded || seg.Pending is not null || _browser is null) return;
+        bool isWindow = WindowManager.IsWindowSpec(link.Url);
+        if (tile.Excluded || seg.Pending is not null || (_browser is null && !isWindow)) return;
 
         if (_openedUrls.Contains(link.Url) && seg.Link?.Url != link.Url)
         {
@@ -626,6 +666,31 @@ internal sealed class MainForm : Form
             return;
         }
 
+        if (isWindow)
+        {
+            LaunchedWindow? attached = WindowManager.Attach(link.Url, ToSurfaceArea(tile, seg.Area), surface.Handle);
+            if (attached is null)
+            {
+                CloseSurfaceIfEmpty(tile);
+                if (!quiet)
+                    MessageBox.Show(this,
+                        $"No se pudo adjuntar «{link.Titulo.TrimStart('▣', ' ')}».\n\n" +
+                        "Puede que la ventana se haya cerrado, o que esa aplicación se ejecute como administrador " +
+                        "(en ese caso, abra IGP_Soft también como administrador).",
+                        "No se pudo adjuntar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            seg.Link = link;
+            seg.Launched = attached;
+            _openedUrls.Add(link.Url);
+            tile.Invalidate();
+            UpdateInfo();
+            SaveLastSession();
+            EnforceWindows();
+            ApplyPanelStacking();
+            return;
+        }
+
         var token = new object();
         seg.Pending = token;
         seg.Link = link;
@@ -634,7 +699,7 @@ internal sealed class MainForm : Form
         UpdateInfo();
         SaveLastSession();
 
-        Browser browser = _browser;
+        Browser browser = _browser!;
         bool keepData = Profiles.KeepData;
         Rectangle area = ToSurfaceArea(tile, seg.Area);
         string tag = $"{tile.Monitor.ShortName}-{seg.Index}";
@@ -663,6 +728,7 @@ internal sealed class MainForm : Form
             t.Invalidate();
             UpdateInfo();
             CloseSurfaceIfEmpty(t);
+            if (quiet) return;
             MessageBox.Show(this,
                 error is not null
                     ? $"No se pudo abrir el navegador:\n{error}"
@@ -747,7 +813,8 @@ internal sealed class MainForm : Form
         if (seg.Launched is not null)
         {
             LaunchedWindow w = seg.Launched;
-            Task.Run(() => WindowManager.Close(w));
+            if (w.Attached) WindowManager.Release(w);
+            else Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
         }
         seg.Pending = null;
@@ -803,6 +870,9 @@ internal sealed class MainForm : Form
 
     private void CloseAllSurfaces()
     {
+        foreach (Segment s in _tiles.SelectMany(t => t.Segments))
+            if (s.Launched is { Attached: true } w)
+                WindowManager.Release(w);
         foreach (DisplaySurface surface in _surfaces.Values.ToList())
             if (!surface.IsDisposed) surface.Close();
         _surfaces.Clear();
@@ -955,7 +1025,7 @@ internal sealed class MainForm : Form
 
             foreach ((MonitorTile t, Segment s, LinkDef link) in wanted)
                 if (!_openedUrls.Contains(link.Url))
-                    AssignAndOpen(t, s, link);
+                    AssignAndOpen(t, s, link, quiet: true);
         }
         finally { _applyingProfile = false; }
 
@@ -1034,6 +1104,16 @@ internal sealed class MainForm : Form
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.Style |= 0x02000000 | 0x04000000;
+                return cp;
+            }
+        }
     }
 
     internal sealed class Segment

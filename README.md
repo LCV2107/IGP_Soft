@@ -18,6 +18,8 @@ Programa para mostrar las pantallas de monitoreo del **IGP (Instituto Geofísico
 
 Para cambiarlo, vuelve a hacer clic en el cuadro y elige otro enlace. Para quitarlo, elige **✖ Cerrar esta ventana**.
 
+Puedes hacer clic y usar normalmente lo que se muestra en cada zona (desplazarte, abrir menús, escribir), pero las ventanas quedan fijas en su lugar: no se pueden mover ni cambiar de tamaño.
+
 Un enlace solo se puede abrir en un lugar a la vez: si ya está abierto, aparece como *(ya abierto)* en los demás monitores.
 
 ## 3. Dividir un monitor en varias zonas
@@ -37,7 +39,21 @@ En el menú de cualquier zona, elige **➕ Elemento personalizado (imagen / vide
 2. Si quieres tenerlo siempre disponible, marca la opción para agregarlo a la lista.
 3. Acepta: se muestra en esa zona. Los videos se repiten en bucle y sin sonido.
 
-## 5. Botones del panel
+## 5. Adjuntar una ventana de otra aplicación
+
+Puedes poner en una zona cualquier programa que ya tengas abierto (Excel, un visor, otra aplicación de monitoreo, etc.):
+
+1. Abre primero el programa que quieres mostrar.
+2. En el panel, haz clic en la zona y elige **▣ Adjuntar ventana abierta**.
+3. Elige la ventana de la lista. Se coloca sin bordes y se adapta al tamaño de la zona.
+
+Para quitarla, haz clic en la zona y elige **↩ Soltar ventana**: vuelve al escritorio con su tamaño y posición originales. Al salir de IGP_Soft también se devuelven todas; **nunca se cierran**.
+
+Si guardas un perfil con ventanas adjuntas, al abrirlo se vuelven a adjuntar, siempre que esos programas ya estén abiertos.
+
+> Las aplicaciones de la Tienda de Windows (Configuración, Calculadora…) no se pueden adjuntar. Si un programa se ejecuta como administrador, abre IGP_Soft también como administrador.
+
+## 6. Botones del panel
 
 | Botón | Para qué sirve |
 |-------|----------------|
@@ -45,7 +61,7 @@ En el menú de cualquier zona, elige **➕ Elemento personalizado (imagen / vide
 | **Vista previa en vivo** | Muestra u oculta la miniatura de cada monitor dentro del panel. |
 | **Omitir la pantalla principal (laptop)** | No usa la pantalla principal (por ejemplo, la laptop desde la que manejas el programa). |
 | **Abrir en orden** | Llena todas las zonas de una vez con los enlaces de la lista, en orden. |
-| **Perfiles…** | Guarda y abre configuraciones completas de pantallas (ver punto 7). |
+| **Perfiles…** | Guarda y abre configuraciones completas de pantallas (ver punto 8). |
 | **Enlaces…** | Agrega, edita, ordena o elimina enlaces de la lista. |
 | **Identificar monitores** | Muestra el número de cada monitor sobre la pantalla real. |
 | **Cerrar todas las ventanas** | Quita todo lo que se está mostrando. |
@@ -53,7 +69,7 @@ En el menú de cualquier zona, elige **➕ Elemento personalizado (imagen / vide
 
 Para omitir cualquier otro monitor, haz clic en su cuadro y elige **Omitir esta pantalla**.
 
-## 6. Editar la lista de enlaces
+## 7. Editar la lista de enlaces
 
 Pulsa **Enlaces…**:
 
@@ -71,7 +87,7 @@ La primera vez la lista trae estos enlaces:
 | Última información volcánica (CENVUL) | https://cenvul.igp.gob.pe/ultima-informacion |
 | Lahares y huaicos | https://grd.igp.gob.pe/lahares-huaicos/ |
 
-## 7. Perfiles: guardar y abrir configuraciones
+## 8. Perfiles: guardar y abrir configuraciones
 
 Un **perfil** recuerda cómo dejaste todo: qué monitores se usan, en cuántas zonas está dividido cada uno y qué enlace va en cada zona.
 
@@ -108,13 +124,13 @@ Crea un acceso directo a `IGP_Soft.exe` y, en *Destino*, agrega al final el nomb
 "C:\ruta\IGP_Soft.exe" --perfil="Sala de monitoreo"
 ```
 
-## 8. Mantener las sesiones iniciadas
+## 9. Mantener las sesiones iniciadas
 
 Si alguna página pide usuario y contraseña, abre **Perfiles…** y marca **Conservar datos de navegación (cookies, inicios de sesión)**. Así solo tendrás que iniciar sesión una vez y el programa lo recordará las siguientes veces.
 
 Para olvidar esos datos, pulsa **Borrar datos guardados**.
 
-## 9. Ocultar, mostrar y salir
+## 10. Ocultar, mostrar y salir
 
 - La **X** del panel no cierra el programa: lo oculta junto al reloj (icono azul **IGP**). Las pantallas siguen mostrándose.
 - **Doble clic** en ese icono vuelve a mostrar el panel.
@@ -130,4 +146,4 @@ El programa guarda todo en la misma carpeta que `IGP_Soft.exe`. Si copias la car
 | `IGP_Soft.enlaces.txt` | La lista de enlaces |
 | `IGP_Soft.perfiles.json` | Los perfiles guardados |
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
-| `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 8) |
+| `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |

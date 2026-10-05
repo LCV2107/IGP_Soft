@@ -35,6 +35,9 @@ internal static class Program
         string? perfil = args.FirstOrDefault(a => a.StartsWith("--perfil=", StringComparison.OrdinalIgnoreCase))
                              ?["--perfil=".Length..].Trim('"');
 
+        AppDomain.CurrentDomain.UnhandledException += (_, _) => WindowManager.ReleaseAll();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => WindowManager.ReleaseAll();
+
         ApplicationConfiguration.Initialize();
         Application.Run(new MainForm(perfil ?? Startup.Profile));
         GC.KeepAlive(_instanceMutex);

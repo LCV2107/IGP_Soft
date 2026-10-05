@@ -315,7 +315,16 @@ internal sealed class LaunchedWindow
     public IntPtr ParentHwnd { get; init; }
     public Rectangle DesiredArea;
     public volatile bool Closed;
+    public bool Attached { get; init; }
+    public long OriginalStyle { get; init; }
+    public Rectangle OriginalBounds { get; init; }
+    public bool WasMaximized { get; init; }
+    public bool Released;
+    public Rectangle Insets;
+    public Rectangle AppliedRegion;
 }
+
+internal sealed record OpenWindow(IntPtr Hwnd, int Pid, string ProcessName, string Title);
 
 internal static class ProcessInfo
 {
@@ -418,6 +427,15 @@ internal static class WindowManager
             url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
             var before = SnapshotWindows(browser.ProcessName);
 
+            Rectangle onScreen = area;
+            double scale = 1.0;
+            if (parentHwnd != IntPtr.Zero && NativeMethods.GetWindowRect(parentHwnd, out NativeMethods.RECT pr))
+            {
+                onScreen.Offset(pr.Left, pr.Top);
+                uint dpi = NativeMethods.GetDpiForWindow(parentHwnd);
+                if (dpi > 0) scale = dpi / 96.0;
+            }
+
             var psi = new ProcessStartInfo
             {
                 FileName = browser.ExePath,
@@ -436,13 +454,19 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--disable-infobars");
                 psi.ArgumentList.Add("--disable-features=Translate");
                 psi.ArgumentList.Add("--disable-search-engine-choice-screen");
-                psi.ArgumentList.Add($"--window-position={area.X},{area.Y}");
+                psi.ArgumentList.Add($"--window-position={onScreen.X},{onScreen.Y}");
                 psi.ArgumentList.Add($"--window-size={area.Width},{area.Height}");
-                psi.ArgumentList.Add($"--app={url}");
+                psi.ArgumentList.Add("--kiosk");
+                if (browser.Name.Equals("Edge", StringComparison.OrdinalIgnoreCase))
+                {
+                    psi.ArgumentList.Add("--edge-kiosk-type=fullscreen");
+                    psi.ArgumentList.Add("--kiosk-idle-timeout-minutes=0");
+                }
+                psi.ArgumentList.Add(url);
             }
             else
             {
-                WriteFirefoxProfile(profileDir);
+                WriteFirefoxProfile(profileDir, onScreen, scale);
                 psi.ArgumentList.Add("-profile");
                 psi.ArgumentList.Add(profileDir);
                 psi.ArgumentList.Add("-no-remote");
@@ -473,7 +497,7 @@ internal static class WindowManager
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 15000 && hwnd == IntPtr.Zero)
             {
-                Thread.Sleep(300);
+                Thread.Sleep(120);
                 foreach ((IntPtr h, int p) in EnumBrowserWindows(browser.ProcessName))
                 {
                     if (before.Contains(h)) continue;
@@ -543,6 +567,7 @@ internal static class WindowManager
 
     public static void Close(LaunchedWindow win)
     {
+        if (win.Attached) { Release(win); return; }
         win.Closed = true;
 
         try
@@ -582,10 +607,143 @@ internal static class WindowManager
         }
     }
 
+    public const string WindowScheme = "ventana:";
+
+    public static bool IsWindowSpec(string url) => url.StartsWith(WindowScheme, StringComparison.OrdinalIgnoreCase);
+
+    public static string SpecOf(OpenWindow w) => $"{WindowScheme}{w.ProcessName}|{w.Title}";
+
+    private static readonly HashSet<string> ShellClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd",
+        "ApplicationFrameWindow", "Windows.UI.Core.CoreWindow",
+    };
+
+    public static List<OpenWindow> ListOpenWindows()
+    {
+        var result = new List<OpenWindow>();
+        int self = Environment.ProcessId;
+
+        NativeMethods.EnumWindows((hWnd, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(hWnd)) return true;
+            int len = NativeMethods.GetWindowTextLength(hWnd);
+            if (len == 0) return true;
+            if (NativeMethods.IsHungAppWindow(hWnd)) return true;
+            if (NativeMethods.GetWindow(hWnd, NativeMethods.GW_OWNER) != IntPtr.Zero) return true;
+            long ex = NativeMethods.GetWindowLongPtr(hWnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+            if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
+            if (NativeMethods.DwmGetWindowAttribute(hWnd, NativeMethods.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
+                && cloaked != 0) return true;
+
+            var cls = new StringBuilder(64);
+            NativeMethods.GetClassName(hWnd, cls, cls.Capacity);
+            if (ShellClasses.Contains(cls.ToString())) return true;
+
+            NativeMethods.GetWindowThreadProcessId(hWnd, out uint pid);
+            if (pid == self) return true;
+
+            var title = new StringBuilder(len + 1);
+            NativeMethods.GetWindowText(hWnd, title, title.Capacity);
+            try
+            {
+                using var pr = Process.GetProcessById((int)pid);
+                result.Add(new OpenWindow(hWnd, (int)pid, pr.ProcessName, title.ToString()));
+            }
+            catch { }
+            return true;
+        }, IntPtr.Zero);
+
+        return result.OrderBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(w => w.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    private static OpenWindow? FindOpenWindow(string spec)
+    {
+        string body = spec[WindowScheme.Length..];
+        int bar = body.IndexOf('|');
+        string proc = bar >= 0 ? body[..bar] : body;
+        string title = bar >= 0 ? body[(bar + 1)..] : "";
+
+        var same = ListOpenWindows().Where(w => w.ProcessName.Equals(proc, StringComparison.OrdinalIgnoreCase)).ToList();
+        return same.FirstOrDefault(w => w.Title == title) ?? same.FirstOrDefault();
+    }
+
+    public static LaunchedWindow? Attach(string spec, Rectangle area, IntPtr parentHwnd)
+    {
+        OpenWindow? w = FindOpenWindow(spec);
+        if (w is null) return null;
+
+        IntPtr h = w.Hwnd;
+        if (NativeMethods.IsHungAppWindow(h)) return null;
+        bool maximized = NativeMethods.IsZoomed(h);
+        if (maximized || NativeMethods.IsIconic(h)) NativeMethods.ShowWindow(h, NativeMethods.SW_RESTORE);
+        NativeMethods.GetWindowRect(h, out NativeMethods.RECT r);
+
+        var win = new LaunchedWindow
+        {
+            ProcessId = w.Pid, Hwnd = h, ProfileDir = "", ProcessName = w.ProcessName, Borderless = true,
+            ParentHwnd = parentHwnd, DesiredArea = area, Attached = true,
+            OriginalStyle = NativeMethods.GetWindowLongPtr(h, NativeMethods.GWL_STYLE).ToInt64(),
+            OriginalBounds = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom),
+            WasMaximized = maximized,
+        };
+
+        PlaceWindow(win);
+        if (NativeMethods.GetParent(h) != parentHwnd)
+        {
+            Release(win);
+            return null;
+        }
+
+        lock (AttachedWindows) AttachedWindows.Add(win);
+        Task.Run(() =>
+        {
+            for (int i = 0; i < 10 && !win.Closed; i++)
+            {
+                Thread.Sleep(500);
+                if (NativeMethods.IsWindow(h)) PlaceWindow(win);
+                else break;
+            }
+        });
+        return win;
+    }
+
+    private static readonly HashSet<LaunchedWindow> AttachedWindows = new();
+
+    public static void ReleaseAll()
+    {
+        List<LaunchedWindow> all;
+        lock (AttachedWindows) all = AttachedWindows.ToList();
+        foreach (LaunchedWindow w in all) Release(w);
+    }
+
+    public static void Release(LaunchedWindow win)
+    {
+        lock (AttachedWindows) AttachedWindows.Remove(win);
+        win.Closed = true;
+        lock (win)
+        {
+            if (win.Released) return;
+            win.Released = true;
+
+            IntPtr h = win.Hwnd;
+            if (!NativeMethods.IsWindow(h)) return;
+            NativeMethods.SetWindowRgn(h, IntPtr.Zero, false);
+            NativeMethods.SetParent(h, IntPtr.Zero);
+            NativeMethods.SetWindowLongPtr(h, NativeMethods.GWL_STYLE, new IntPtr(win.OriginalStyle));
+            Rectangle b = win.OriginalBounds;
+            NativeMethods.SetWindowPos(h, IntPtr.Zero, b.X, b.Y, b.Width, b.Height,
+                NativeMethods.SWP_NOZORDER | NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW);
+            if (win.WasMaximized) NativeMethods.ShowWindow(h, NativeMethods.SW_MAXIMIZE);
+        }
+    }
+
     private static void PlaceWindow(LaunchedWindow win)
     {
         lock (win)
         {
+            if (win.Attached && win.Closed) return;
             IntPtr hwnd = win.Hwnd;
             Rectangle area = win.DesiredArea;
             if (NativeMethods.IsIconic(hwnd))
@@ -595,12 +753,21 @@ internal static class WindowManager
             if (win.Borderless)
             {
                 long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
-                long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME |
-                                    NativeMethods.WS_POPUP);
+                long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME | NativeMethods.WS_POPUP |
+                                    NativeMethods.WS_MINIMIZEBOX | NativeMethods.WS_MAXIMIZEBOX | NativeMethods.WS_MAXIMIZE);
                 if (win.ParentHwnd != IntPtr.Zero) want |= NativeMethods.WS_CHILD;
                 if (want != cur)
                 {
                     NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want));
+                    frameChanged = true;
+                }
+
+                long curEx = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE).ToInt64();
+                long wantEx = curEx & ~(NativeMethods.WS_EX_DLGMODALFRAME | NativeMethods.WS_EX_WINDOWEDGE |
+                                        NativeMethods.WS_EX_CLIENTEDGE | NativeMethods.WS_EX_STATICEDGE);
+                if (wantEx != curEx)
+                {
+                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(wantEx));
                     frameChanged = true;
                 }
             }
@@ -611,15 +778,58 @@ internal static class WindowManager
                 frameChanged = true;
             }
 
+            Rectangle target = Expand(area, win.Insets);
             if (!frameChanged && win.ParentHwnd != IntPtr.Zero &&
-                NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, area))
+                NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, target))
                 return;
 
-            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW;
+            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOOWNERZORDER;
             if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
             IntPtr order = win.ParentHwnd == IntPtr.Zero ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP;
-            NativeMethods.SetWindowPos(hwnd, order, area.X, area.Y, area.Width, area.Height, flags);
+            NativeMethods.SetWindowPos(hwnd, order, target.X, target.Y, target.Width, target.Height, flags);
+
+            if (win.ParentHwnd == IntPtr.Zero) return;
+
+            Rectangle insets = MeasureInsets(hwnd);
+            if (insets != win.Insets)
+            {
+                win.Insets = insets;
+                target = Expand(area, insets);
+                NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, target.X, target.Y, target.Width, target.Height,
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOOWNERZORDER);
+            }
+
+            var region = new Rectangle(insets.X, insets.Y, area.Width, area.Height);
+            bool needsRegion = insets != Rectangle.Empty;
+            if (needsRegion ? region != win.AppliedRegion : win.AppliedRegion != Rectangle.Empty)
+            {
+                IntPtr rgn = needsRegion
+                    ? NativeMethods.CreateRectRgn(region.Left, region.Top, region.Right, region.Bottom)
+                    : IntPtr.Zero;
+                if (NativeMethods.SetWindowRgn(hwnd, rgn, true) == 0 && rgn != IntPtr.Zero)
+                    NativeMethods.DeleteObject(rgn);
+                win.AppliedRegion = needsRegion ? region : Rectangle.Empty;
+            }
         }
+    }
+
+    private static Rectangle Expand(Rectangle area, Rectangle insets) =>
+        new(area.X - insets.X, area.Y - insets.Y, area.Width + insets.X + insets.Width, area.Height + insets.Y + insets.Height);
+
+    private static Rectangle MeasureInsets(IntPtr hwnd)
+    {
+        if (!NativeMethods.GetWindowRect(hwnd, out NativeMethods.RECT w) ||
+            !NativeMethods.GetClientRect(hwnd, out NativeMethods.RECT c))
+            return Rectangle.Empty;
+        var origin = new NativeMethods.POINT();
+        if (!NativeMethods.ClientToScreen(hwnd, ref origin)) return Rectangle.Empty;
+
+        int left = origin.X - w.Left;
+        int top = origin.Y - w.Top;
+        int right = (w.Right - w.Left) - left - (c.Right - c.Left);
+        int bottom = (w.Bottom - w.Top) - top - (c.Bottom - c.Top);
+        if (left < 0 || top < 0 || right < 0 || bottom < 0 || left + top + right + bottom > 200) return Rectangle.Empty;
+        return new Rectangle(left, top, right, bottom);
     }
 
     private static bool IsAt(IntPtr hwnd, IntPtr parent, Rectangle area)
@@ -631,10 +841,15 @@ internal static class WindowManager
                r.Right - r.Left == area.Width && r.Bottom - r.Top == area.Height;
     }
 
-    private static void WriteFirefoxProfile(string dir)
+    private static void WriteFirefoxProfile(string dir, Rectangle onScreen, double scale)
     {
         try
         {
+            int Css(int v) => (int)Math.Round(v / scale);
+            File.WriteAllText(Path.Combine(dir, "xulstore.json"),
+                "{\"chrome://browser/content/browser.xhtml\":{\"main-window\":{" +
+                $"\"screenX\":\"{Css(onScreen.X)}\",\"screenY\":\"{Css(onScreen.Y)}\"," +
+                $"\"width\":\"{Css(onScreen.Width)}\",\"height\":\"{Css(onScreen.Height)}\",\"sizemode\":\"normal\"}}}}");
             File.WriteAllText(Path.Combine(dir, "user.js"),
                 "user_pref(\"datareporting.policy.dataSubmissionPolicyBypassNotification\", true);\n" +
                 "user_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\n" +
@@ -653,6 +868,12 @@ internal static class WindowManager
                 "user_pref(\"browser.laterrun.enabled\", false);\n" +
                 "user_pref(\"browser.fullscreen.autohide\", false);\n" +
                 "user_pref(\"browser.tabs.warnOnClose\", false);\n" +
+                "user_pref(\"browser.tabs.inTitlebar\", 0);\n" +
+                "user_pref(\"full-screen-api.ignore-widgets\", true);\n" +
+                "user_pref(\"browser.link.open_newwindow\", 1);\n" +
+                "user_pref(\"browser.link.open_newwindow.restriction\", 0);\n" +
+                "user_pref(\"dom.disable_window_move_resize\", true);\n" +
+                "user_pref(\"browser.startup.preXulSkeletonUI\", false);\n" +
                 "user_pref(\"browser.sessionstore.resume_from_crash\", false);\n" +
                 "user_pref(\"browser.sessionstore.resume_session_once\", false);\n" +
                 "user_pref(\"browser.startup.page\", 0);\n" +
@@ -664,7 +885,10 @@ internal static class WindowManager
             string chromeDir = Path.Combine(dir, "chrome");
             Directory.CreateDirectory(chromeDir);
             File.WriteAllText(Path.Combine(chromeDir, "userChrome.css"),
-                "#navigator-toolbox { visibility: collapse !important; }\n");
+                "#navigator-toolbox, #titlebar, #TabsToolbar, #nav-bar, #PersonalToolbar, #sidebar-box, #sidebar-main " +
+                "{ visibility: collapse !important; border: 0 !important; }\n" +
+                ":root, #navigator-toolbox, #browser, #tabbrowser-tabbox, #tabbrowser-tabpanels, .browserContainer, .browserStack " +
+                "{ border: 0 !important; margin: 0 !important; padding: 0 !important; outline: none !important; box-shadow: none !important; }\n");
         }
         catch { }
     }
@@ -703,6 +927,30 @@ internal static class WindowManager
         }, IntPtr.Zero);
 
         return result;
+    }
+}
+
+internal static class WindowWatcher
+{
+    private static NativeMethods.WinEventProc? _proc;
+    private static IntPtr _hook;
+
+    public static void Start(Action<IntPtr> moved)
+    {
+        if (_hook != IntPtr.Zero) return;
+        _proc = (_, _, hwnd, idObject, idChild, _, _) =>
+        {
+            if (idObject == 0 && idChild == 0 && hwnd != IntPtr.Zero) moved(hwnd);
+        };
+        _hook = NativeMethods.SetWinEventHook(NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
+            NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, _proc, 0, 0,
+            NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+    }
+
+    public static void Stop()
+    {
+        if (_hook != IntPtr.Zero) NativeMethods.UnhookWinEvent(_hook);
+        _hook = IntPtr.Zero;
     }
 }
 
@@ -807,9 +1055,71 @@ internal static class NativeMethods
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsHungAppWindow(IntPtr hWnd);
+
+    public delegate void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild,
+        uint idEventThread, uint dwmsEventTime);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc,
+        WinEventProc lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public static readonly IntPtr HWND_TOP = IntPtr.Zero;
     public const int SW_RESTORE = 9;
+    public const int SW_MAXIMIZE = 3;
+    public const uint GW_OWNER = 4;
+    public const int GWL_EXSTYLE = -20;
+    public const long WS_EX_TOOLWINDOW = 0x00000080;
+    public const long WS_EX_DLGMODALFRAME = 0x00000001;
+    public const long WS_EX_WINDOWEDGE = 0x00000100;
+    public const long WS_EX_CLIENTEDGE = 0x00000200;
+    public const long WS_EX_STATICEDGE = 0x00020000;
+    public const long WS_MINIMIZEBOX = 0x00020000;
+    public const long WS_MAXIMIZEBOX = 0x00010000;
+    public const long WS_MAXIMIZE = 0x01000000;
+    public const uint SWP_NOOWNERZORDER = 0x0200;
+    public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+    public const int DWMWA_CLOAKED = 14;
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
