@@ -39,6 +39,7 @@ internal static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => WindowManager.ReleaseAll();
 
         ApplicationConfiguration.Initialize();
+        ToolStripManager.Renderer = new ModernMenuRenderer();
         Application.Run(new MainForm(perfil ?? Startup.Profile));
         GC.KeepAlive(_instanceMutex);
     }

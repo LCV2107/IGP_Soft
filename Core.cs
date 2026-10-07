@@ -97,7 +97,7 @@ internal static class LinkStore
     }
 
     private static bool LooksLikePath(string s) =>
-        (s.Length >= 2 && s[1] == ':') ||
+        AssetStore.IsAssetPath(s) || (s.Length >= 2 && s[1] == ':') ||
         s.StartsWith(@"\\") || s.StartsWith("./") || s.StartsWith("../") ||
         s.StartsWith('/') || File.Exists(s);
 
@@ -371,6 +371,7 @@ internal static class MediaWrapper
         s = s.Trim().Trim('"');
         if (s.Length == 0) return s;
         if (s.Contains("://")) return s;
+        s = AssetStore.Resolve(s);
         try { return new Uri(Path.GetFullPath(s)).AbsoluteUri; }
         catch { return s; }
     }
@@ -550,17 +551,6 @@ internal static class WindowManager
                 if (NativeMethods.IsWindow(win.Hwnd))
                     PlaceWindow(win);
             }
-        }
-        catch { }
-    }
-
-    public static void BringToTop(IntPtr hwnd)
-    {
-        try
-        {
-            if (hwnd != IntPtr.Zero && NativeMethods.IsWindow(hwnd))
-                NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-                    NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         }
         catch { }
     }

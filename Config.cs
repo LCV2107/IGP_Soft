@@ -24,6 +24,12 @@ internal static class Config
         catch { }
     }
 
+    public static void Reload()
+    {
+        Values.Clear();
+        Load();
+    }
+
     public static string? Get(string key) => Values.TryGetValue(key, out string? v) ? v : null;
 
     public static void Set(string key, string value)

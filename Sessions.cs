@@ -18,6 +18,9 @@ internal sealed class MonitorLayout
     public bool Primary { get; set; }
     public bool Excluded { get; set; }
     public int Zones { get; set; } = 1;
+    public int Cols { get; set; }
+    public int Rows { get; set; }
+    public List<ZoneSpec>? Layout { get; set; }
     public List<ZoneLayout> Links { get; set; } = new();
 }
 
@@ -72,6 +75,14 @@ internal static class ProfileStore
         Items.RemoveAll(p => string.Equals(p.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
         Items.Add(profile);
         Save();
+    }
+
+    public static void RewriteUrls(IReadOnlyDictionary<string, string> map)
+    {
+        bool changed = false;
+        foreach (ZoneLayout z in Items.SelectMany(p => p.Monitors).SelectMany(m => m.Links))
+            if (map.TryGetValue(z.Url, out string? to)) { z.Url = to; changed = true; }
+        if (changed) Save();
     }
 
     public static void Remove(string name)

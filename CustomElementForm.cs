@@ -2,50 +2,50 @@ namespace IGP_Soft;
 
 internal sealed class CustomElementForm : Form
 {
-    private readonly TextBox _titulo = new();
-    private readonly TextBox _target = new();
-    private readonly CheckBox _add = new();
+    private readonly RoundedTextBox _tituloBox = new("Opcional. Por ejemplo: «Mapa de peligros»", 476);
+    private readonly RoundedTextBox _targetBox = new("https://… o elige un archivo de tu PC", 370);
+    private readonly ToggleSwitch _add = new("Agregar también a la lista de enlaces");
 
-    public string Titulo => _titulo.Text.Trim();
-    public string Target => _target.Text.Trim();
+    public string Titulo => _tituloBox.Box.Text.Trim();
+    public string Target => _targetBox.Box.Text.Trim();
     public bool AddToList => _add.Checked;
 
     public CustomElementForm(int monitorNumber)
     {
-        Text = $"Elemento para el monitor {monitorNumber}";
+        Theme.StyleWindow(this, darkCaption: false);
+        Text = $"Mostrar en el monitor {monitorNumber}";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        TopMost = true;
-        ClientSize = new Size(470, 200);
-        Font = new Font("Segoe UI", 9f);
+        ClientSize = new Size(524, 300);
 
-        var l1 = new Label { Text = "Título (opcional):", AutoSize = true, Location = new Point(12, 14) };
-        _titulo.SetBounds(12, 33, 446, 24);
-
-        var l2 = new Label { Text = "Archivo o URL (imagen, video o página web):", AutoSize = true, Location = new Point(12, 66) };
-        _target.SetBounds(12, 85, 350, 24);
-        var browse = new Button { Text = "Examinar…", Location = new Point(370, 84), Size = new Size(88, 26) };
+        var card = new Card { Location = new Point(14, 14), Size = new Size(496, 216), Padding = new Padding(0) };
+        var title = new Label { Text = "Imagen, video o página web", Font = Theme.Section, ForeColor = Theme.Text, AutoSize = true, Location = new Point(20, 16), BackColor = Theme.Surface };
+        var l1 = new Label { Text = "Título", ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(20, 48), BackColor = Theme.Surface };
+        _tituloBox.Location = new Point(10, 68);
+        var l2 = new Label { Text = "Archivo o dirección web", ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(20, 112), BackColor = Theme.Surface };
+        _targetBox.Location = new Point(10, 132);
+        var browse = new ModernButton("Examinar", ButtonKind.Secondary, "▤") { Location = new Point(388, 133), Size = new Size(98, 36) };
         browse.Click += (_, _) => Browse();
-
-        _add.Text = "Agregar también a la lista de enlaces";
         _add.Checked = true;
-        _add.SetBounds(12, 120, 446, 22);
+        _add.Location = new Point(10, 176);
+        _add.Width = 470;
+        card.Controls.AddRange(new Control[] { title, l1, _tituloBox, l2, _targetBox, browse, _add });
 
-        var ok = new Button { Text = "Abrir", DialogResult = DialogResult.OK, Location = new Point(298, 158), Size = new Size(76, 30) };
-        var cancel = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(382, 158), Size = new Size(76, 30) };
+        var ok = new ModernButton("Mostrar", ButtonKind.Primary, "▶") { DialogResult = DialogResult.OK, Location = new Point(300, 248), Size = new Size(110, 38) };
+        var cancel = new ModernButton("Cancelar") { DialogResult = DialogResult.Cancel, Location = new Point(418, 248), Size = new Size(92, 38) };
         AcceptButton = ok;
         CancelButton = cancel;
 
-        Controls.AddRange(new Control[] { l1, _titulo, l2, _target, browse, _add, ok, cancel });
+        Controls.AddRange(new Control[] { card, ok, cancel });
 
         FormClosing += (_, e) =>
         {
             if (DialogResult == DialogResult.OK && Target.Length == 0)
             {
-                MessageBox.Show(this, "Indica un archivo o una URL.", "Elemento",
+                MessageBox.Show(this, "Indica un archivo o una dirección web.", "Mostrar",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 e.Cancel = true;
             }
@@ -60,11 +60,9 @@ internal sealed class CustomElementForm : Form
             Filter = "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
                      "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
         };
-        if (d.ShowDialog(this) == DialogResult.OK)
-        {
-            _target.Text = d.FileName;
-            if (_titulo.Text.Trim().Length == 0)
-                _titulo.Text = Path.GetFileNameWithoutExtension(d.FileName);
-        }
+        if (d.ShowDialog(this) != DialogResult.OK) return;
+        _targetBox.Box.Text = d.FileName;
+        if (_tituloBox.Box.Text.Trim().Length == 0)
+            _tituloBox.Box.Text = Path.GetFileNameWithoutExtension(d.FileName);
     }
 }

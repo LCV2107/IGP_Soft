@@ -18,8 +18,8 @@ internal sealed class MainForm : Form
     private readonly Label _info = new();
     private readonly Panel _canvas = new();
     private readonly ComboBox _cboBrowser = new();
-    private readonly CheckBox _chkPreview = new();
-    private readonly CheckBox _chkSkipPrimary = new();
+    private readonly ToggleSwitch _chkPreview = new("");
+    private readonly ToggleSwitch _chkSkipPrimary = new("");
     private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 1500 };
     private volatile bool _capturing;
     private NotifyIcon _tray = null!;
@@ -28,12 +28,20 @@ internal sealed class MainForm : Form
     private bool _trayHintShown;
     private EventWaitHandle? _showEvent;
     private RegisteredWaitHandle? _showReg;
-    private readonly Button _btnAuto = new();
-    private readonly Button _btnLinks = new();
-    private readonly Button _btnIdentify = new();
-    private readonly Button _btnCloseAll = new();
-    private readonly Button _btnRefresh = new();
-    private readonly Button _btnProfiles = new();
+    private readonly Panel _content = new();
+    private readonly List<(ModernButton Nav, Page Page)> _nav = new();
+    private readonly Panel _sideStatus = new();
+    private readonly Chip _chipBrowser = new();
+    private readonly Chip _chipMonitors = new();
+    private readonly Chip _chipZones = new();
+    private readonly Chip _chipOpen = new();
+    private readonly Chip _chipLinks = new();
+    private Page _screensPage = null!;
+    private LinksPage _linksPage = null!;
+    private GalleryPage _galleryPage = null!;
+    private ProfilesPage _profilesPage = null!;
+    private ExportPage _exportPage = null!;
+    private SettingsPage _settingsPage = null!;
     private ToolStripMenuItem _trayProfiles = null!;
     private bool _sessionReady;
     private bool _applyingProfile;
@@ -42,10 +50,8 @@ internal sealed class MainForm : Form
     {
         Text = "IGP_Soft — Pantallas de monitoreo IGP";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 480);
-        Size = new Size(980, 600);
-        Font = new Font("Segoe UI", 9f);
-        BackColor = Color.White;
+        MinimumSize = new Size(980, 620);
+        Size = new Size(1240, 760);
         TopMost = false;
 
         _browsers = BrowserLocator.InstalledAll();
@@ -60,19 +66,19 @@ internal sealed class MainForm : Form
 
         if (_browser is null)
         {
-            _info.ForeColor = Color.Firebrick;
-            _info.Text = "ERROR: no hay navegador compatible (Edge, Chrome, Brave, Firefox u Opera). Instale uno.";
+            _info.Visible = true;
+            _info.Text = "⚠  No hay un navegador compatible (Edge, Chrome, Brave, Firefox u Opera). Instala uno para mostrar pantallas.";
         }
 
         _previewTimer.Tick += (_, _) =>
         {
             CheckClosedWindows();
             EnforceWindows();
-            ApplyPanelStacking();
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
         WindowWatcher.Start(OnWindowMoved);
+        AssetStore.Moved += OnAssetsMoved;
 
         Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
 
@@ -88,6 +94,7 @@ internal sealed class MainForm : Form
         {
             _previewTimer.Stop();
             WindowWatcher.Stop();
+            AssetStore.Moved -= OnAssetsMoved;
             _showReg?.Unregister(null);
             _showEvent?.Dispose();
             CloseIdentifyForms();
@@ -102,28 +109,19 @@ internal sealed class MainForm : Form
 
     private void BuildLayout()
     {
+        Theme.StyleWindow(this, darkCaption: true);
+
         _info.Dock = DockStyle.Top;
         _info.Height = 34;
         _info.TextAlign = ContentAlignment.MiddleLeft;
-        _info.Padding = new Padding(12, 0, 12, 0);
-        _info.Text = _browser is null ? "Buscando navegador…" : $"Navegador: {_browser.Name}";
+        _info.ForeColor = Theme.Danger;
+        _info.Font = Theme.BodyBold;
+        _info.Visible = false;
 
-        var hint = new Label
-        {
-            Dock = DockStyle.Top,
-            Height = 26,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(12, 0, 12, 0),
-            ForeColor = Color.DimGray,
-            Text = "Clic en una zona → elige el enlace.  Con  − n +  (arriba de cada monitor) divides ese monitor en 2, 4, 6… partes.",
-        };
-
-        var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 84, Padding = new Padding(12, 8, 12, 8) };
-
-        var lblBrowser = new Label { Text = "Navegador:", AutoSize = true, Margin = new Padding(0, 9, 4, 10) };
         _cboBrowser.DropDownStyle = ComboBoxStyle.DropDownList;
-        _cboBrowser.Width = 110;
-        _cboBrowser.Margin = new Padding(0, 5, 20, 10);
+        _cboBrowser.FlatStyle = FlatStyle.Flat;
+        _cboBrowser.Font = Theme.Body;
+        _cboBrowser.Width = 220;
         foreach (Browser b in _browsers) _cboBrowser.Items.Add(b.Name);
         if (_browser is not null) _cboBrowser.SelectedItem = _browser.Name;
         _cboBrowser.Enabled = _browsers.Count > 0;
@@ -133,47 +131,164 @@ internal sealed class MainForm : Form
             if (b is not null) { _browser = b; Config.Set("browser", b.Name); UpdateInfo(); }
         };
 
-        _chkPreview.Text = "Vista previa en vivo";
+        _chkPreview.Text = "Vista previa en vivo de cada monitor en el panel";
         _chkPreview.Checked = true;
-        _chkPreview.AutoSize = true;
-        _chkPreview.Margin = new Padding(0, 6, 20, 10);
         _chkPreview.CheckedChanged += (_, _) => { if (!_chkPreview.Checked) ClearPreviews(); };
 
-        _chkSkipPrimary.Text = "Omitir la pantalla principal (laptop)";
-        _chkSkipPrimary.AutoSize = true;
-        _chkSkipPrimary.Margin = new Padding(0, 6, 16, 10);
+        _chkSkipPrimary.Text = "No usar la pantalla principal (la laptop desde la que manejas el programa)";
         _chkSkipPrimary.CheckedChanged += (_, _) => { _skipPrimaryTouched = true; ApplySkipPrimary(); SaveLastSession(); };
 
-        _btnAuto.Text = "Abrir en orden";
-        _btnLinks.Text = "Enlaces…";
-        _btnIdentify.Text = "Identificar monitores";
-        _btnCloseAll.Text = "Cerrar todas las ventanas";
-        _btnRefresh.Text = "Actualizar";
-        _btnProfiles.Text = "Perfiles…";
-        foreach (Button b in new[] { _btnAuto, _btnProfiles, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh })
-        {
-            b.AutoSize = true;
-            b.Padding = new Padding(10, 4, 10, 4);
-            b.Margin = new Padding(0, 0, 8, 0);
-        }
-        _btnAuto.Click += (_, _) => AutoAssignInOrder();
-        _btnProfiles.Click += (_, _) => EditProfiles();
-        _btnLinks.Click += (_, _) => EditLinks();
-        _btnIdentify.Click += (_, _) => IdentifyMonitors();
-        _btnCloseAll.Click += (_, _) => CloseAll();
-        _btnRefresh.Click += (_, _) => ReloadMonitors();
-        bottom.Controls.AddRange(new Control[] { lblBrowser, _cboBrowser, _chkPreview, _chkSkipPrimary, _btnAuto, _btnProfiles, _btnLinks, _btnIdentify, _btnCloseAll, _btnRefresh });
-        bottom.SetFlowBreak(_chkSkipPrimary, true);
+        _screensPage = new Page("Pantallas", "Haz clic en una zona para elegir qué mostrar. Con ▦ divides un monitor o unes zonas.");
+        ModernButton gridAll = Page.ToolButton("▦  Dividir todos", () => { });
+        gridAll.Click += (_, _) => ShowGridPickerForAll(gridAll);
+        FlowLayoutPanel actions = Page.ToolBar(
+            Page.ToolButton("▶  Abrir en orden", AutoAssignInOrder, primary: true),
+            gridAll,
+            Page.ToolButton("◎  Identificar", IdentifyMonitors),
+            Page.ToolButton("⟳  Actualizar", ReloadMonitors),
+            Page.ToolButton("✕  Cerrar todas", CloseAll));
+
+        var chips = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, WrapContents = false, BackColor = Theme.Background };
+        foreach (Chip c in new[] { _chipBrowser, _chipMonitors, _chipZones, _chipOpen, _chipLinks }) chips.Controls.Add(c);
 
         _canvas.Dock = DockStyle.Fill;
-        _canvas.BackColor = Color.FromArgb(238, 240, 243);
-        _canvas.Padding = new Padding(24);
+        _canvas.BackColor = Theme.Background;
+        _canvas.Padding = new Padding(8, 12, 8, 8);
         _canvas.Resize += (_, _) => RelayoutTiles();
+        _screensPage.Body.Controls.Add(_canvas);
+        _screensPage.Body.Controls.Add(chips);
+        _screensPage.Body.Controls.Add(_info);
+        _screensPage.Body.Controls.Add(actions);
 
-        Controls.Add(_canvas);
-        Controls.Add(bottom);
-        Controls.Add(hint);
-        Controls.Add(_info);
+        _linksPage = new LinksPage();
+        _linksPage.Changed += () =>
+        {
+            foreach (MonitorTile t in _tiles) t.Invalidate();
+            UpdateInfo();
+        };
+        _galleryPage = new GalleryPage(GalleryTargets);
+        _profilesPage = new ProfilesPage(Snapshot, p =>
+        {
+            ApplyProfile(p);
+            ShowPage(_screensPage);
+        });
+        _exportPage = new ExportPage(() => { CloseAllWindows(); return true; }, AfterRestore);
+        _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary);
+
+        var side = new Panel { Dock = DockStyle.Left, Width = 236, BackColor = Theme.Sidebar };
+        var brand = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Sidebar };
+        brand.Paint += (_, e) =>
+        {
+            Graphics g = e.Graphics;
+            Theme.Smooth(g);
+            var logo = new Rectangle(22, 26, 42, 42);
+            using (var grad = new System.Drawing.Drawing2D.LinearGradientBrush(logo, Color.FromArgb(59, 130, 246), Color.FromArgb(37, 99, 235), 45f))
+            using (var path = Theme.Round(logo, 11))
+                g.FillPath(grad, path);
+            TextRenderer.DrawText(g, "IGP", Theme.SmallBold, logo, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            using var title = Theme.Ui(13f, FontStyle.Bold);
+            TextRenderer.DrawText(g, "IGP_Soft", title, new Point(74, 26), Color.White);
+            TextRenderer.DrawText(g, "Pantallas de monitoreo", Theme.Small, new Point(75, 50), Theme.SidebarMuted);
+        };
+
+        var navList = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false,
+            BackColor = Theme.Sidebar, Padding = new Padding(14, 8, 0, 0),
+        };
+        navList.Controls.Add(new Label
+        {
+            Text = "MENÚ", Font = Theme.SmallBold, ForeColor = Theme.SidebarMuted, AutoSize = false,
+            Size = new Size(200, 24), Margin = new Padding(8, 0, 0, 4), TextAlign = ContentAlignment.MiddleLeft,
+        });
+        foreach ((string glyph, string text, Page page) in new (string, string, Page)[]
+                 {
+                     ("▦", "Pantallas", _screensPage), ("☰", "Enlaces", _linksPage), ("▤", "Galería", _galleryPage),
+                     ("★", "Perfiles", _profilesPage), ("⇪", "Exportar y copias", _exportPage), ("⚙", "Ajustes", _settingsPage),
+                 })
+        {
+            var b = new ModernButton(text, ButtonKind.Nav, glyph)
+            {
+                Size = new Size(208, 42), Margin = new Padding(0, 0, 0, 4), Radius = 10, BackColor = Theme.Sidebar,
+            };
+            Page target = page;
+            b.Click += (_, _) => ShowPage(target);
+            navList.Controls.Add(b);
+            _nav.Add((b, page));
+            page.Visible = false;
+            _content.Controls.Add(page);
+        }
+
+        _sideStatus.Dock = DockStyle.Bottom;
+        _sideStatus.Height = 78;
+        _sideStatus.BackColor = Theme.Sidebar;
+        _sideStatus.Paint += PaintSideStatus;
+
+        side.Controls.Add(navList);
+        side.Controls.Add(_sideStatus);
+        side.Controls.Add(brand);
+
+        _content.Dock = DockStyle.Fill;
+        _content.BackColor = Theme.Background;
+        Controls.Add(_content);
+        Controls.Add(side);
+        ShowPage(_screensPage);
+    }
+
+    private void PaintSideStatus(object? sender, PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        Theme.Smooth(g);
+        var card = new RectangleF(14, 8, _sideStatus.Width - 28, _sideStatus.Height - 20);
+        Theme.FillRound(g, Theme.SidebarHover, card, 10);
+        int open = _tiles.Sum(t => t.Segments.Count(s => s.Launched is not null));
+        Color dot = _browser is null ? Theme.Danger : open > 0 ? Color.FromArgb(74, 222, 128) : Theme.SidebarMuted;
+        using (var b = new SolidBrush(dot)) g.FillEllipse(b, card.X + 14, card.Y + 17, 9, 9);
+        string state = _browser is null ? "Sin navegador" : open > 0 ? $"{open} pantalla(s) en vivo" : "Sin pantallas abiertas";
+        TextRenderer.DrawText(g, state, Theme.SmallBold, new Point((int)card.X + 30, (int)card.Y + 12), Color.White);
+        TextRenderer.DrawText(g, $"{_monitors.Count} monitor(es) · {_browser?.Name ?? "—"}", Theme.Small,
+            new Point((int)card.X + 30, (int)card.Y + 32), Theme.SidebarMuted);
+    }
+
+    private void ShowPage(Page page)
+    {
+        foreach ((ModernButton nav, Page p) in _nav) nav.Selected = p == page;
+        page.OnPageShown();
+        page.Visible = true;
+        page.BringToFront();
+        foreach ((_, Page p) in _nav)
+            if (p != page) p.Visible = false;
+        if (page == _screensPage)
+        {
+            foreach (MonitorTile t in _tiles) t.Invalidate();
+            UpdateInfo();
+        }
+    }
+
+    private IReadOnlyList<GalleryTarget> GalleryTargets()
+    {
+        var targets = new List<GalleryTarget>();
+        foreach (MonitorTile t in _tiles.Where(t => !t.Excluded))
+            foreach (Segment s in t.Usable)
+            {
+                MonitorTile tile = t;
+                Segment seg = s;
+                string label = t.Usable.Count() > 1 ? $"Monitor {t.Number} · zona {t.DisplayNumber(s)}" : $"Monitor {t.Number}";
+                targets.Add(new GalleryTarget(label, s.Link?.Titulo, link => AssignAndOpen(tile, seg, link)));
+            }
+        return targets;
+    }
+
+    private void AfterRestore()
+    {
+        Config.Reload();
+        LinkStore.Load();
+        ProfileStore.Load();
+        string? want = Config.Get("browser");
+        if (want is not null && _browsers.Any(b => b.Name.Equals(want, StringComparison.OrdinalIgnoreCase)))
+            _cboBrowser.SelectedItem = _browsers.First(b => b.Name.Equals(want, StringComparison.OrdinalIgnoreCase)).Name;
+        foreach (MonitorTile t in _tiles) t.Invalidate();
+        UpdateInfo();
     }
 
     private void BuildTray()
@@ -181,7 +296,7 @@ internal sealed class MainForm : Form
         _trayIcon = BuildIcon();
         Icon = _trayIcon;
 
-        var menu = new ContextMenuStrip();
+        var menu = Theme.Menu();
         menu.Items.Add(new ToolStripMenuItem("Abrir panel", null, (_, _) => ShowFromTray()) { Font = new Font(Font, FontStyle.Bold) });
         menu.Items.Add(new ToolStripSeparator());
         _trayProfiles = new ToolStripMenuItem("Abrir perfil");
@@ -246,7 +361,6 @@ internal sealed class MainForm : Form
         Show();
         ShowInTaskbar = true;
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        TopMost = IsWallActive();
         BringToFront();
         Activate();
     }
@@ -273,14 +387,20 @@ internal sealed class MainForm : Form
         Close();
     }
 
-    private void EditLinks()
+    private void OnAssetsMoved(IReadOnlyDictionary<string, string> map)
     {
-        using var f = new LinksForm();
-        if (f.ShowDialog(this) == DialogResult.OK)
+        foreach (MonitorTile t in _tiles)
         {
-            foreach (MonitorTile t in _tiles) t.Invalidate();
-            UpdateInfo();
+            foreach (Segment s in t.Segments)
+            {
+                if (s.Link is null || !map.TryGetValue(s.Link.Url, out string? to)) continue;
+                _openedUrls.Remove(s.Link.Url);
+                s.Link = s.Link with { Url = to };
+                _openedUrls.Add(to);
+            }
+            t.Invalidate();
         }
+        SaveLastSession();
     }
 
     private void ReloadMonitors()
@@ -292,9 +412,9 @@ internal sealed class MainForm : Form
         foreach (MonitorTile missing in _tiles.Where(t => !currentDevices.Contains(t.Monitor.DeviceName)).ToList())
             CloseTileWindows(missing);
 
-        var prev = new Dictionary<string, (int seg, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items)>();
+        var prev = new Dictionary<string, (GridLayout layout, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items)>();
         foreach (MonitorTile t in _tiles)
-            prev[t.Monitor.DeviceName] = (t.SegCount, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
+            prev[t.Monitor.DeviceName] = (t.Grid, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
 
         foreach (MonitorTile t in _tiles) { _canvas.Controls.Remove(t); t.Dispose(); }
         _tiles.Clear();
@@ -311,7 +431,7 @@ internal sealed class MainForm : Form
 
             if (prev.TryGetValue(m.DeviceName, out var pv))
             {
-                tile.BuildSegments(pv.seg);
+                tile.Apply(pv.layout);
                 for (int k = 0; k < tile.Segments.Count && k < pv.items.Count; k++)
                 {
                     tile.Segments[k].Link = pv.items[k].Link;
@@ -322,7 +442,7 @@ internal sealed class MainForm : Form
 
             tile.SegmentActivated += ShowSegmentMenu;
             tile.MonitorMenuRequested += ShowMonitorMenu;
-            tile.SegStep += ChangeSegments;
+            tile.GridRequested += ShowGridPicker;
             _tiles.Add(tile);
             _canvas.Controls.Add(tile);
 
@@ -363,11 +483,18 @@ internal sealed class MainForm : Form
 
     private void UpdateInfo()
     {
-        if (_browser is null) return;
         int abiertas = _tiles.Sum(t => t.Segments.Count(s => s.Launched is not null));
-        int zonas = _tiles.Where(t => !t.Excluded).Sum(t => t.Segments.Count);
-        _info.Text = $"Navegador: {_browser.Name}   ·   Monitores: {_monitors.Count}   ·   Zonas: {zonas}" +
-                     $"   ·   Enlaces: {LinkStore.Links.Count}   ·   Ventanas abiertas: {abiertas}";
+        int zonas = _tiles.Where(t => !t.Excluded).Sum(t => t.Usable.Count());
+        _chipBrowser.Set("Navegador", _browser?.Name ?? "ninguno");
+        _chipMonitors.Set("Monitores", _monitors.Count.ToString());
+        _chipZones.Set("Zonas", zonas.ToString());
+        _chipOpen.Set("En vivo", abiertas.ToString());
+        _chipOpen.Fill = abiertas > 0 ? Theme.SuccessSoft : Theme.Surface;
+        _chipLinks.Set("Enlaces", LinkStore.Links.Count.ToString());
+        _sideStatus.Invalidate();
+        foreach (MonitorTile t in _tiles)
+            if (_surfaces.TryGetValue(t.Monitor.DeviceName, out DisplaySurface? surface) && !surface.IsDisposed)
+                surface.SetContents(t.Usable.Where(s => s.Link is not null).Select(s => s.Link!.Titulo.TrimStart('▣', ' ')));
     }
 
     private void RelayoutTiles()
@@ -393,7 +520,7 @@ internal sealed class MainForm : Form
         int offX = area.Left + (area.Width - usedW) / 2;
         int offY = area.Top + (area.Height - usedH) / 2;
 
-        const int gap = 4;
+        const int gap = 8;
         foreach (MonitorTile t in _tiles)
         {
             MonitorInfo m = t.Monitor;
@@ -426,11 +553,6 @@ internal sealed class MainForm : Form
         if (cambio) UpdateInfo();
     }
 
-    private bool IsWallActive()
-    {
-        return _tiles.Any(t => !t.Excluded && t.Segments.Any(s => s.Launched is not null || s.Pending is not null));
-    }
-
     private void OnWindowMoved(IntPtr hwnd)
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
@@ -451,24 +573,6 @@ internal sealed class MainForm : Form
             foreach (Segment s in t.Segments)
                 if (s.Launched is not null)
                     WindowManager.Reposition(s.Launched, ToSurfaceArea(t, s.Area));
-    }
-
-    private void ApplyPanelStacking()
-    {
-        if (_identifyForms.Any(f => !f.IsDisposed)) return;
-
-        bool wall = IsWallActive();
-        if (wall)
-        {
-            if (!TopMost) TopMost = true;
-            if (Visible && !IsDisposed)
-                NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-                    NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
-        }
-        else if (TopMost)
-        {
-            TopMost = false;
-        }
     }
 
     private void ClearPreviews()
@@ -549,7 +653,7 @@ internal sealed class MainForm : Form
 
     private void ShowMonitorMenu(MonitorTile tile)
     {
-        var menu = new ContextMenuStrip();
+        var menu = Theme.Menu();
         menu.Items.Add(new ToolStripLabel($"Monitor {tile.Number}{(tile.Monitor.IsPrimary ? " (principal)" : "")}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
         var incl = new ToolStripMenuItem(tile.Excluded ? "Incluir esta pantalla" : "Omitir esta pantalla") { Checked = tile.Excluded };
@@ -567,10 +671,31 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var menu = new ContextMenuStrip();
-        string zona = tile.Segments.Count > 1 ? $" · zona {seg.Index + 1}/{tile.Segments.Count}" : "";
+        var menu = Theme.Menu();
+        int usable = tile.Usable.Count();
+        string zona = seg.Disabled ? " · zona sin usar" : usable > 1 ? $" · zona {tile.DisplayNumber(seg)}/{usable}" : "";
         menu.Items.Add(new ToolStripLabel($"Monitor {tile.Number}{zona}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+
+        var disenar = new ToolStripMenuItem("▦  Diseñar grilla de este monitor…");
+        disenar.Click += (_, _) => EditLayout(tile);
+        menu.Items.Add(disenar);
+
+        if (seg.Disabled)
+        {
+            var usar = new ToolStripMenuItem("✓  Usar esta zona");
+            usar.Click += (_, _) => ToggleZone(tile, seg);
+            menu.Items.Add(usar);
+            menu.Show(Cursor.Position);
+            return;
+        }
+
+        if (tile.Segments.Count > 1)
+        {
+            var noUsar = new ToolStripMenuItem("⊘  No usar esta zona") { Enabled = usable > 1 };
+            noUsar.Click += (_, _) => ToggleZone(tile, seg);
+            menu.Items.Add(noUsar);
+        }
 
         var omitir = new ToolStripMenuItem("Omitir esta pantalla");
         omitir.Click += (_, _) => ToggleExcluded(tile);
@@ -632,20 +757,34 @@ internal sealed class MainForm : Form
         return attach;
     }
 
-    private void AddCustomElement(MonitorTile tile, Segment seg)
+    private async void AddCustomElement(MonitorTile tile, Segment seg)
     {
         if (tile.Excluded) return;
-        using var d = new CustomElementForm(tile.Number);
-        if (d.ShowDialog(this) != DialogResult.OK) return;
-        var link = new LinkDef(d.Titulo, d.Target);
-        link = d.AddToList ? LinkStore.Add(link) : link;
+        string titulo, target;
+        bool addToList;
+        using (var d = new CustomElementForm(tile.Number))
+        {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            (titulo, target, addToList) = (d.Titulo, d.Target, d.AddToList);
+        }
+
+        if (AssetStore.IsExternalFile(target))
+        {
+            UseWaitCursor = true;
+            try { target = await Task.Run(() => AssetStore.Import(target)); }
+            finally { UseWaitCursor = false; }
+        }
+
+        var link = new LinkDef(titulo, target);
+        link = addToList ? LinkStore.Add(link) : link;
         AssignAndOpen(tile, seg, link);
     }
 
     private async void AssignAndOpen(MonitorTile tile, Segment seg, LinkDef link, bool quiet = false)
     {
         bool isWindow = WindowManager.IsWindowSpec(link.Url);
-        if (tile.Excluded || seg.Pending is not null || (_browser is null && !isWindow)) return;
+        if (tile.Excluded || seg.Disabled || seg.Pending is not null || (_browser is null && !isWindow)) return;
+        bool panelActive = ActiveForm == this || (Visible && ContainsFocus);
 
         if (_openedUrls.Contains(link.Url) && seg.Link?.Url != link.Url)
         {
@@ -687,7 +826,7 @@ internal sealed class MainForm : Form
             UpdateInfo();
             SaveLastSession();
             EnforceWindows();
-            ApplyPanelStacking();
+            KeepPanelInFront(panelActive);
             return;
         }
 
@@ -742,7 +881,13 @@ internal sealed class MainForm : Form
         t.Invalidate();
         UpdateInfo();
         EnforceWindows();
-        ApplyPanelStacking();
+        KeepPanelInFront(panelActive);
+    }
+
+    private void KeepPanelInFront(bool wasActive)
+    {
+        if (!wasActive || !Visible || IsDisposed || WindowState == FormWindowState.Minimized) return;
+        Activate();
     }
 
     private (MonitorTile? Tile, Segment? Seg) FindPending(object token)
@@ -758,7 +903,7 @@ internal sealed class MainForm : Form
         var targets = new List<(MonitorTile T, Segment S)>();
         foreach (MonitorTile t in _tiles)
             if (!t.Excluded)
-                foreach (Segment s in t.Segments)
+                foreach (Segment s in t.Usable)
                     targets.Add((t, s));
 
         if (targets.Count == 0)
@@ -779,32 +924,68 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void ChangeSegments(MonitorTile tile, int delta)
+    private void ShowGridPicker(MonitorTile tile, Point screen)
     {
-        int idx = Array.IndexOf(MonitorTile.Steps, tile.SegCount);
-        int next = Math.Clamp(idx + delta, 0, MonitorTile.Steps.Length - 1);
-        if (next == idx) return;
+        GridPicker.Show(this, screen, tile.Cols, tile.Rows, (c, r) =>
+        {
+            SetGrid(tile, c, r);
+            SaveLastSession();
+        }, () => EditLayout(tile));
+    }
 
-        SetSegCount(tile, MonitorTile.Steps[next]);
+    private void EditLayout(MonitorTile tile)
+    {
+        var contents = tile.Segments.Where(s => s.Link is not null).ToDictionary(s => s.Index, s => s.Link!.Titulo);
+        using var f = new LayoutEditorForm(tile.Number, new Size(tile.Monitor.Width, tile.Monitor.Height), tile.Grid, contents);
+        if (f.ShowDialog(this) != DialogResult.OK) return;
+        SetLayout(tile, f.Result);
         SaveLastSession();
     }
 
-    private void SetSegCount(MonitorTile tile, int newCount)
+    private void ToggleZone(MonitorTile tile, Segment seg)
     {
-        if (newCount == tile.SegCount) return;
+        var zones = tile.Grid.Zones.Select((z, i) => i == seg.Index ? z with { Off = !z.Off } : z).ToList();
+        GridLayout next = tile.Grid.With(zones);
+        if (next.ActiveCount == 0) return;
+        SetLayout(tile, next);
+        SaveLastSession();
+    }
 
-        if (newCount < tile.Segments.Count)
-            for (int k = newCount; k < tile.Segments.Count; k++)
-                if (tile.Segments[k].Launched is not null || tile.Segments[k].Link is not null ||
-                    tile.Segments[k].Pending is not null)
-                    CloseSeg(tile, tile.Segments[k]);
+    private void ShowGridPickerForAll(Control anchor)
+    {
+        MonitorTile? first = _tiles.FirstOrDefault(t => !t.Excluded);
+        if (first is null) return;
+        GridPicker.Show(this, anchor.PointToScreen(new Point(anchor.Width, 0)), first.Cols, first.Rows, (c, r) =>
+        {
+            foreach (MonitorTile t in _tiles.Where(t => !t.Excluded)) SetGrid(t, c, r);
+            SaveLastSession();
+        });
+    }
 
-        tile.BuildSegments(newCount);
+    private void SetGrid(MonitorTile tile, int cols, int rows) => SetLayout(tile, GridLayout.Uniform(cols, rows));
 
-        foreach (Segment s in tile.Segments)
-            if (s.Launched is not null)
-                WindowManager.Reposition(s.Launched, ToSurfaceArea(tile, s.Area));
+    private void SetLayout(MonitorTile tile, GridLayout layout)
+    {
+        if (layout.SameAs(tile.Grid)) return;
 
+        List<Segment> old = tile.Segments.ToList();
+        Dictionary<int, int> carry = GridLayout.Carry(tile.Grid, old.Where(s => s.Busy).Select(s => s.Index), layout);
+        foreach (Segment s in old.Where(s => s.Busy && !carry.ContainsKey(s.Index)))
+            CloseSeg(tile, s);
+
+        var moving = carry.Select(kv => (Target: kv.Value, old[kv.Key].Link, old[kv.Key].Launched, old[kv.Key].Pending)).ToList();
+        tile.Apply(layout);
+        foreach (var m in moving)
+        {
+            Segment seg = tile.Segments[m.Target];
+            seg.Link = m.Link;
+            seg.Launched = m.Launched;
+            seg.Pending = m.Pending;
+            if (seg.Launched is not null)
+                WindowManager.Reposition(seg.Launched, ToSurfaceArea(tile, seg.Area));
+        }
+
+        CloseSurfaceIfEmpty(tile);
         UpdateInfo();
     }
 
@@ -845,14 +1026,14 @@ internal sealed class MainForm : Form
     {
         if (!_surfaces.TryGetValue(tile.Monitor.DeviceName, out DisplaySurface? surface) || surface.IsDisposed)
         {
-            surface = new DisplaySurface(tile.Monitor);
+            surface = new DisplaySurface(tile.Monitor, tile.Number, Icon);
             _surfaces[tile.Monitor.DeviceName] = surface;
             surface.Show();
         }
         surface.Place(tile.Monitor);
-        TopMost = true;
-        NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        if (Visible && !IsDisposed)
+            NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOP, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         return surface;
     }
 
@@ -865,7 +1046,6 @@ internal sealed class MainForm : Form
         if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null)) return;
         if (!_surfaces.Remove(tile.Monitor.DeviceName, out DisplaySurface? surface)) return;
         if (!surface.IsDisposed) surface.Close();
-        ApplyPanelStacking();
     }
 
     private void CloseAllSurfaces()
@@ -920,13 +1100,6 @@ internal sealed class MainForm : Form
         SaveLastSession();
     }
 
-    private void EditProfiles()
-    {
-        using var f = new ProfilesForm(Snapshot);
-        f.ShowDialog(this);
-        if (f.ToOpen is not null) ApplyProfile(f.ToOpen);
-    }
-
     private void FillProfileMenu(ToolStripMenuItem parent)
     {
         parent.DropDownItems.Clear();
@@ -951,7 +1124,10 @@ internal sealed class MainForm : Form
             Device = t.Monitor.DeviceName,
             Primary = t.Monitor.IsPrimary,
             Excluded = t.Excluded,
-            Zones = t.SegCount,
+            Zones = t.Segments.Count,
+            Cols = t.Cols,
+            Rows = t.Rows,
+            Layout = t.Grid.IsUniform ? null : t.Grid.Zones.ToList(),
             Links = t.Segments.Where(s => s.Link is not null)
                               .Select(s => new ZoneLayout { Zone = s.Index, Titulo = s.Link!.Titulo, Url = s.Link.Url })
                               .ToList(),
@@ -1007,11 +1183,12 @@ internal sealed class MainForm : Form
                 if (t.Excluded != ml.Excluded) ToggleExcluded(t);
                 if (t.Excluded) continue;
 
-                int zones = MonitorTile.Steps.FirstOrDefault(n => n >= ml.Zones, MonitorTile.Steps[^1]);
-                SetSegCount(t, zones);
+                (int cols, int rows) = ml.Cols > 0 && ml.Rows > 0 ? (ml.Cols, ml.Rows) : MonitorTile.LegacyGrid(ml.Zones);
+                SetLayout(t, GridLayout.FromSaved(cols, rows, ml.Layout));
 
                 foreach (Segment s in t.Segments)
                 {
+                    if (s.Disabled) continue;
                     ZoneLayout? z = ml.Links.FirstOrDefault(l => l.Zone == s.Index);
                     LinkDef? link = z is null ? null
                         : LinkStore.Links.FirstOrDefault(l => l.Url.Equals(z.Url, StringComparison.OrdinalIgnoreCase))
@@ -1041,25 +1218,30 @@ internal sealed class MainForm : Form
         {
             MonitorInfo m = _monitors[i];
             bool excl = _excludedDevices.Contains(m.DeviceName);
+            const int w = 320, h = 240;
             var f = new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.Manual,
                 ShowInTaskbar = false,
                 TopMost = true,
-                BackColor = excl ? Color.FromArgb(120, 120, 120) : Color.FromArgb(0, 120, 215),
+                BackColor = excl ? Color.FromArgb(71, 85, 105) : Theme.Accent,
                 ControlBox = false,
+                Size = new Size(w, h),
             };
-            f.Controls.Add(new Label
+            using (var shape = Theme.Round(new RectangleF(0, 0, w, h), 28)) f.Region = new Region(shape);
+            int number = i + 1;
+            string caption = excl ? "Omitida" : m.IsPrimary ? "Monitor principal" : "Monitor";
+            f.Paint += (_, e) =>
             {
-                Dock = DockStyle.Fill,
-                Text = excl ? $"{i + 1}\n(omitida)" : (i + 1).ToString(),
-                ForeColor = Color.White,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI", excl ? 48f : 96f, FontStyle.Bold),
-            });
+                Theme.Smooth(e.Graphics);
+                using var big = Theme.Ui(96f, FontStyle.Bold);
+                TextRenderer.DrawText(e.Graphics, number.ToString(), big, new Rectangle(0, 10, w, 170), Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(e.Graphics, caption, Theme.Section, new Rectangle(0, 172, w, 40), Color.FromArgb(219, 234, 254),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
 
-            const int w = 300, h = 220;
             f.Show();
             NativeMethods.SetWindowPos(f.Handle, IntPtr.Zero,
                 m.X + (m.Width - w) / 2, m.Y + (m.Height - h) / 2, w, h,
@@ -1082,15 +1264,17 @@ internal sealed class MainForm : Form
 
     private sealed class DisplaySurface : Form
     {
-        public DisplaySurface(MonitorInfo monitor)
+        public int Number { get; }
+
+        public DisplaySurface(MonitorInfo monitor, int number, Icon? icon)
         {
-            Text = $"IGP_Soft — {monitor.ShortName}";
+            Number = number;
+            Text = $"IGP_Soft — Monitor {number}";
+            if (icon is not null) Icon = icon;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
-            ShowInTaskbar = false;
-            ControlBox = false;
+            ShowInTaskbar = true;
             BackColor = Color.White;
-            TopMost = true;
             Place(monitor);
         }
 
@@ -1098,9 +1282,16 @@ internal sealed class MainForm : Form
         {
             Bounds = new Rectangle(monitor.X, monitor.Y, monitor.Width, monitor.Height);
             if (IsHandleCreated)
-                NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST,
+                NativeMethods.SetWindowPos(Handle, IntPtr.Zero,
                     monitor.X, monitor.Y, monitor.Width, monitor.Height,
-                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_SHOWWINDOW);
+        }
+
+        public void SetContents(IEnumerable<string> titles)
+        {
+            string list = string.Join(", ", titles);
+            string text = $"IGP_Soft — Monitor {Number}" + (list.Length > 0 ? " · " + list : "");
+            if (Text != text) Text = text;
         }
 
         protected override bool ShowWithoutActivation => true;
@@ -1119,31 +1310,37 @@ internal sealed class MainForm : Form
     internal sealed class Segment
     {
         public int Index;
+        public ZoneSpec Spec = new(0, 0);
         public Rectangle Area;
         public RectangleF TileRect;
         public LinkDef? Link;
         public LaunchedWindow? Launched;
         public object? Pending;
+        public bool Disabled => Spec.Off;
+        public bool Busy => Link is not null || Launched is not null || Pending is not null;
     }
 
     private sealed class MonitorTile : Panel
     {
-        public static readonly int[] Steps = { 1, 2, 3, 4, 6, 8, 9 };
-
         private const TextFormatFlags C = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
 
         public int Number { get; }
         public MonitorInfo Monitor { get; }
         public bool Excluded { get; set; }
         public Bitmap? Preview { get; set; }
-        public int SegCount { get; private set; } = 1;
+        public GridLayout Grid { get; private set; } = GridLayout.Uniform(1, 1);
+        public int Cols => Grid.Cols;
+        public int Rows => Grid.Rows;
         public List<Segment> Segments { get; } = new();
+        public IEnumerable<Segment> Usable => Segments.Where(s => !s.Disabled);
 
         public event Action<MonitorTile, Segment>? SegmentActivated;
         public event Action<MonitorTile>? MonitorMenuRequested;
-        public event Action<MonitorTile, int>? SegStep;
+        public event Action<MonitorTile, Point>? GridRequested;
 
         private bool _hover;
+        private bool _hoverCtrl;
+        private Segment? _hoverSeg;
         private Rectangle _ctrlRect;
 
         public MonitorTile(int number, MonitorInfo monitor)
@@ -1152,12 +1349,13 @@ internal sealed class MainForm : Form
             Monitor = monitor;
             DoubleBuffered = true;
             Cursor = Cursors.Hand;
+            BackColor = Theme.Background;
             MouseEnter += (_, _) => { _hover = true; Invalidate(); };
-            MouseLeave += (_, _) => { _hover = false; Invalidate(); };
-            BuildSegments(1);
+            MouseLeave += (_, _) => { _hover = false; _hoverSeg = null; _hoverCtrl = false; Invalidate(); };
+            Apply(GridLayout.Uniform(1, 1));
         }
 
-        public static (int cols, int rows) Grid(int n) => n switch
+        public static (int cols, int rows) LegacyGrid(int n) => n switch
         {
             2 => (2, 1),
             3 => (3, 1),
@@ -1168,39 +1366,23 @@ internal sealed class MainForm : Form
             _ => (1, 1),
         };
 
-        public void BuildSegments(int count)
+        public void Apply(GridLayout layout)
         {
-            var old = Segments.ToList();
+            Grid = layout;
             Segments.Clear();
-            SegCount = count;
-            (int cols, int rows) = Grid(count);
-
-            for (int r = 0; r < rows; r++)
-            for (int c = 0; c < cols; c++)
-            {
-                int i = r * cols + c;
-                int sw = Monitor.Width / cols, sh = Monitor.Height / rows;
-                int x = Monitor.X + c * sw, y = Monitor.Y + r * sh;
-                int w = c == cols - 1 ? Monitor.Width - c * sw : sw;
-                int h = r == rows - 1 ? Monitor.Height - r * sh : sh;
-
-                var seg = new Segment { Index = i, Area = new Rectangle(x, y, w, h) };
-                if (i < old.Count) { seg.Link = old[i].Link; seg.Launched = old[i].Launched; seg.Pending = old[i].Pending; }
-                Segments.Add(seg);
-            }
+            var bounds = new Rectangle(Monitor.X, Monitor.Y, Monitor.Width, Monitor.Height);
+            for (int i = 0; i < layout.Zones.Count; i++)
+                Segments.Add(new Segment { Index = i, Spec = layout.Zones[i], Area = layout.AreaOf(layout.Zones[i], bounds) });
             LayoutSegments();
             Invalidate();
         }
 
+        public int DisplayNumber(Segment seg) => Usable.TakeWhile(s => s != seg).Count() + 1;
+
         private void LayoutSegments()
         {
-            (int cols, int rows) = Grid(SegCount);
-            float sw = (float)Width / cols, sh = (float)Height / rows;
             foreach (Segment s in Segments)
-            {
-                int c = s.Index % cols, r = s.Index / cols;
-                s.TileRect = new RectangleF(c * sw, r * sh, sw, sh);
-            }
+                s.TileRect = Grid.AreaOf(s.Spec, new SizeF(Width, Height));
         }
 
         protected override void OnResize(EventArgs e)
@@ -1221,9 +1403,7 @@ internal sealed class MainForm : Form
 
             if (!Excluded && _ctrlRect.Contains(e.Location))
             {
-                int third = _ctrlRect.Width / 3;
-                if (e.X < _ctrlRect.X + third) SegStep?.Invoke(this, -1);
-                else if (e.X >= _ctrlRect.X + 2 * third) SegStep?.Invoke(this, +1);
+                GridRequested?.Invoke(this, PointToScreen(new Point(_ctrlRect.Left, _ctrlRect.Bottom + 2)));
                 return;
             }
 
@@ -1233,87 +1413,121 @@ internal sealed class MainForm : Form
             if (seg is not null) SegmentActivated?.Invoke(this, seg);
         }
 
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Segment? over = Excluded || _ctrlRect.Contains(e.Location) ? null : Segments.FirstOrDefault(s => s.TileRect.Contains(e.Location));
+            bool onCtrl = !Excluded && _ctrlRect.Contains(e.Location);
+            if (over == _hoverSeg && onCtrl == _hoverCtrl) return;
+            _hoverSeg = over;
+            _hoverCtrl = onCtrl;
+            Invalidate();
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
             Graphics g = e.Graphics;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Parent?.BackColor ?? Theme.Background);
+            Theme.Smooth(g);
 
             bool preview = Preview is not null && !Excluded;
-            var full = new Rectangle(0, 0, Width - 1, Height - 1);
+            bool live = Segments.Any(s => s.Launched is not null);
+            var card = new RectangleF(3, 2, Width - 7, Height - 8);
+            Theme.Shadow(g, card, 14, _hover ? 6 : 4);
+            using var clip = Theme.Round(card, 14);
 
+            Theme.FillRound(g, Excluded ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59), card, 14);
+            g.SetClip(clip);
             if (preview)
             {
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
-                g.DrawImage(Preview!, new Rectangle(0, 0, Width, Height));
-            }
-            else
-            {
-                using var bg = new SolidBrush(Excluded ? Color.FromArgb(224, 224, 224) : Color.White);
-                g.FillRectangle(bg, full);
-            }
-
-            if (!Excluded && SegCount > 1)
-            {
-                (int cols, int rows) = Grid(SegCount);
-                float sw = (float)Width / cols, sh = (float)Height / rows;
-                using var dark = new Pen(Color.FromArgb(110, 0, 0, 0), 1f);
-                using var light = new Pen(Color.FromArgb(preview ? 210 : 150, 255, 255, 255), 1f);
-                for (int c = 1; c < cols; c++) { g.DrawLine(dark, c * sw, 0, c * sw, Height); g.DrawLine(light, c * sw + 1, 0, c * sw + 1, Height); }
-                for (int r = 1; r < rows; r++) { g.DrawLine(dark, 0, r * sh, Width, r * sh); g.DrawLine(light, 0, r * sh + 1, Width, r * sh + 1); }
+                g.DrawImage(Preview!, card);
             }
 
             if (!Excluded)
             {
-                using var sf = new Font("Segoe UI", 7.5f);
+                bool multi = Segments.Count > 1;
                 foreach (Segment s in Segments)
                 {
-                    Rectangle tr = Rectangle.Round(s.TileRect);
-                    var band = new Rectangle(tr.X, tr.Bottom - 16, Math.Max(1, tr.Width), 16);
-                    using (var bb = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillRectangle(bb, band);
-                    string txt = s.Pending is not null && s.Link is not null ? "⏳ abriendo " + s.Link.Titulo
-                               : s.Link is not null ? "✔ " + s.Link.Titulo
-                               : "clic para asignar";
-                    TextRenderer.DrawText(g, txt, sf, band,
-                        s.Pending is not null ? Color.Khaki
-                        : s.Link is not null ? Color.FromArgb(150, 255, 175) : Color.White,
-                        C | TextFormatFlags.EndEllipsis);
+                    RectangleF zr = s.TileRect;
+                    zr.Intersect(card);
+                    zr.Inflate(multi ? -3f : -6f, multi ? -3f : -6f);
+                    if (zr.Width < 4 || zr.Height < 4) continue;
+                    bool hover = s == _hoverSeg;
+
+                    if (s.Disabled)
+                    {
+                        using var hatch = new System.Drawing.Drawing2D.HatchBrush(System.Drawing.Drawing2D.HatchStyle.BackwardDiagonal,
+                            Color.FromArgb(70, 148, 163, 184), Color.FromArgb(preview ? 170 : 90, 15, 23, 42));
+                        using (var hp = Theme.Round(zr, 8)) g.FillPath(hatch, hp);
+                        TextRenderer.DrawText(g, "sin usar", Theme.Small, Rectangle.Round(zr), Color.FromArgb(203, 213, 225), C);
+                        continue;
+                    }
+
+                    Color fill = hover ? Color.FromArgb(preview ? 90 : 120, 37, 99, 235)
+                               : s.Link is not null ? Color.FromArgb(preview ? 0 : 60, 37, 99, 235)
+                               : Color.FromArgb(preview ? 40 : 18, 255, 255, 255);
+                    if (fill.A > 0) Theme.FillRound(g, fill, zr, 8);
+                    if (multi || hover)
+                    {
+                        using var zp = Theme.Round(zr, 8);
+                        using var pen = new Pen(hover ? Color.FromArgb(147, 197, 253) : Color.FromArgb(preview ? 150 : 60, 255, 255, 255), hover ? 2f : 1f);
+                        if (s.Link is null && !hover) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                        g.DrawPath(pen, zp);
+                    }
+
+                    if (s.Link is null && s.Pending is null)
+                    {
+                        string hint = hover ? "＋  Elegir contenido" : "＋";
+                        TextRenderer.DrawText(g, hint, hover ? Theme.BodyBold : Theme.Section, Rectangle.Round(zr),
+                            hover ? Color.White : Color.FromArgb(preview ? 200 : 110, 255, 255, 255), C);
+                        continue;
+                    }
+
+                    string title = s.Link?.Titulo ?? "";
+                    Color dot = s.Pending is not null ? Color.FromArgb(250, 204, 21) : Color.FromArgb(74, 222, 128);
+                    string txt = s.Pending is not null ? "Abriendo " + title : title;
+                    int maxW = (int)zr.Width - 16;
+                    int tw = Math.Min(maxW - 22, TextRenderer.MeasureText(txt, Theme.Small).Width);
+                    if (maxW < 40) continue;
+                    var pill = new RectangleF(zr.X + 8, zr.Bottom - 30, tw + 28, 22);
+                    Theme.FillRound(g, Color.FromArgb(215, 15, 23, 42), pill, 11);
+                    using (var db = new SolidBrush(dot)) g.FillEllipse(db, pill.X + 9, pill.Y + 7.5f, 7, 7);
+                    TextRenderer.DrawText(g, txt, Theme.Small, new Rectangle((int)pill.X + 20, (int)pill.Y, tw + 4, (int)pill.Height),
+                        Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 }
             }
+            g.ResetClip();
 
-            Color border = Excluded ? Color.FromArgb(170, 170, 170)
-                         : Segments.Any(s => s.Link is not null) ? Color.SeaGreen
-                         : _hover ? Color.FromArgb(0, 120, 215)
-                         : Color.FromArgb(150, 150, 150);
-            using (var pen = new Pen(border, !Excluded && _hover ? 3f : 1.6f))
+            Color border = Excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
+            using (var bp = new Pen(border, _hover || live ? 2f : 1f))
             {
-                if (Excluded) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                g.DrawRectangle(pen, full);
+                if (Excluded) bp.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                g.DrawPath(bp, clip);
             }
 
-            var pill = new Rectangle(5, 5, 30, 20);
-            using (var pb = new SolidBrush(Color.FromArgb(preview ? 160 : 95, 0, 0, 0)))
-                g.FillRectangle(pb, pill);
-            using (var nf = new Font("Segoe UI", 10f, FontStyle.Bold))
-                TextRenderer.DrawText(g, Monitor.IsPrimary ? Number + "★" : Number.ToString(), nf, pill, Color.White, C);
+            string name = $"Monitor {Number}" + (Monitor.IsPrimary ? " · Principal" : "");
+            int nw = TextRenderer.MeasureText(name, Theme.SmallBold).Width + 20;
+            var tag = new RectangleF(card.X + 10, card.Y + 10, nw, 24);
+            Theme.FillRound(g, Excluded ? Color.FromArgb(203, 213, 225) : Color.FromArgb(215, 15, 23, 42), tag, 12);
+            TextRenderer.DrawText(g, name, Theme.SmallBold, Rectangle.Round(tag), Excluded ? Theme.TextMuted : Color.White, C);
 
             if (!Excluded)
             {
-                const int w = 66, h = 20;
-                _ctrlRect = new Rectangle(Width - w - 5, 5, w, h);
-                using (var cb = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
-                    g.FillRectangle(cb, _ctrlRect);
-                int third = w / 3;
-                using var cf = new Font("Segoe UI", 10f, FontStyle.Bold);
-                TextRenderer.DrawText(g, "−", cf, new Rectangle(_ctrlRect.X, _ctrlRect.Y, third, h), Color.White, C);
-                TextRenderer.DrawText(g, SegCount.ToString(), cf, new Rectangle(_ctrlRect.X + third, _ctrlRect.Y, third, h), Color.Gainsboro, C);
-                TextRenderer.DrawText(g, "+", cf, new Rectangle(_ctrlRect.X + 2 * third, _ctrlRect.Y, third, h), Color.White, C);
+                string label = $"⊞  {Grid.Describe()}  ▾";
+                int w = TextRenderer.MeasureText(label, Theme.SmallBold).Width + 22;
+                _ctrlRect = new Rectangle((int)(card.Right - w - 10), (int)card.Y + 10, w, 24);
+                Theme.FillRound(g, _hoverCtrl ? Theme.Accent : Color.FromArgb(215, 15, 23, 42), _ctrlRect, 12);
+                TextRenderer.DrawText(g, label, Theme.SmallBold, _ctrlRect, Color.White, C);
             }
             else
             {
                 _ctrlRect = Rectangle.Empty;
-                using var f = new Font("Segoe UI", 10f, FontStyle.Bold);
-                TextRenderer.DrawText(g, "OMITIDA", f, full, Color.Gray, C);
+                var center = Rectangle.Round(card);
+                TextRenderer.DrawText(g, "Pantalla omitida", Theme.Section, new Rectangle(center.X, center.Y + center.Height / 2 - 24, center.Width, 26),
+                    Theme.TextMuted, C);
+                TextRenderer.DrawText(g, "Clic para volver a incluirla", Theme.Small, new Rectangle(center.X, center.Y + center.Height / 2 + 4, center.Width, 20),
+                    Theme.TextSubtle, C);
             }
         }
     }
