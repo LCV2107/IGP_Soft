@@ -284,14 +284,23 @@ internal static class Profiles
     public static bool IsKept(string dir) =>
         dir.StartsWith(KeepRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-    public static string? KeptDir(string browserName, string url)
+    public static bool HardwareAcceleration
+    {
+        get => Config.Get("aceleracion") != "0";
+        set => Config.Set("aceleracion", value ? "1" : "0");
+    }
+
+    public static int ReloadHours
+    {
+        get => int.TryParse(Config.Get("recargaHoras"), out int h) && h > 0 ? h : 0;
+        set => Config.Set("recargaHoras", value.ToString());
+    }
+
+    public static string? SharedDir(string browserName, bool keep)
     {
         try
         {
-            string slug = string.Concat(url.Where(char.IsLetterOrDigit).Take(40));
-            uint h = 2166136261;
-            foreach (char ch in url.ToLowerInvariant()) h = (h ^ ch) * 16777619;
-            string d = Path.Combine(KeepRoot, browserName, $"{slug}_{h:x8}");
+            string d = keep ? Path.Combine(KeepRoot, browserName, "compartido") : Path.Combine(Root, $"compartido_{browserName}");
             Directory.CreateDirectory(d);
             return d;
         }
@@ -320,6 +329,9 @@ internal sealed class LaunchedWindow
     public Rectangle OriginalBounds { get; init; }
     public bool WasMaximized { get; init; }
     public bool Released;
+    public volatile bool Hidden;
+    public bool Native { get; init; }
+    public object? Tag { get; init; }
     public Rectangle Insets;
     public Rectangle AppliedRegion;
 }
@@ -394,7 +406,7 @@ internal static class MediaWrapper
             "img,video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}" +
             "</style></head><body>" + element + "</body></html>";
 
-        string path = Path.Combine(dir, "view.html");
+        string path = Path.Combine(dir, $"view_{Guid.NewGuid():N}.html");
         File.WriteAllText(path, html, new UTF8Encoding(false));
         return new Uri(path).AbsoluteUri;
     }
@@ -422,9 +434,9 @@ internal static class WindowManager
     {
         lock (LaunchGate)
         {
-            string? kept = keepData ? Profiles.KeptDir(browser.Name, url) : null;
-            if (kept is not null) KillProfileProcesses(browser.ProcessName, kept);
-            string profileDir = kept ?? Profiles.NewDir(tag);
+            string profileDir = Profiles.SharedDir(browser.Name, keepData) ?? Profiles.NewDir(tag);
+            bool running = HasLiveWindows(profileDir);
+            if (!running) KillProfileProcesses(browser.ProcessName, profileDir);
             url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
             var before = SnapshotWindows(browser.ProcessName);
 
@@ -453,10 +465,24 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--disable-session-crashed-bubble");
                 psi.ArgumentList.Add("--hide-crash-restore-bubble");
                 psi.ArgumentList.Add("--disable-infobars");
-                psi.ArgumentList.Add("--disable-features=Translate");
+                psi.ArgumentList.Add("--disable-features=Translate,IsolateOrigins,site-per-process,MediaRouter,OptimizationHints,AutofillServerCommunication");
+                psi.ArgumentList.Add("--renderer-process-limit=4");
+                psi.ArgumentList.Add("--disable-extensions");
+                psi.ArgumentList.Add("--disable-component-update");
+                psi.ArgumentList.Add("--disable-background-networking");
+                psi.ArgumentList.Add("--disable-sync");
+                psi.ArgumentList.Add("--disable-default-apps");
+                psi.ArgumentList.Add("--disable-breakpad");
+                psi.ArgumentList.Add("--disable-domain-reliability");
+                psi.ArgumentList.Add("--disable-client-side-phishing-detection");
+                psi.ArgumentList.Add("--disable-component-extensions-with-background-pages");
+                psi.ArgumentList.Add("--no-pings");
+                psi.ArgumentList.Add("--metrics-recording-only");
+                if (!Profiles.HardwareAcceleration) psi.ArgumentList.Add("--disable-gpu");
                 psi.ArgumentList.Add("--disable-search-engine-choice-screen");
                 psi.ArgumentList.Add($"--window-position={onScreen.X},{onScreen.Y}");
                 psi.ArgumentList.Add($"--window-size={area.Width},{area.Height}");
+                if (running) psi.ArgumentList.Add("--new-window");
                 psi.ArgumentList.Add("--kiosk");
                 if (browser.Name.Equals("Edge", StringComparison.OrdinalIgnoreCase))
                 {
@@ -467,11 +493,10 @@ internal static class WindowManager
             }
             else
             {
-                WriteFirefoxProfile(profileDir, onScreen, scale);
+                if (!running) WriteFirefoxProfile(profileDir, onScreen, scale);
                 psi.ArgumentList.Add("-profile");
                 psi.ArgumentList.Add(profileDir);
-                psi.ArgumentList.Add("-no-remote");
-                psi.ArgumentList.Add("-new-instance");
+                if (running) psi.ArgumentList.Add("-new-window");
                 psi.ArgumentList.Add(url);
             }
 
@@ -488,7 +513,7 @@ internal static class WindowManager
             }
             catch
             {
-                CleanupProfile(browser.ProcessName, profileDir);
+                if (!HasLiveWindows(profileDir)) CleanupProfile(browser.ProcessName, profileDir);
                 return null;
             }
 
@@ -514,7 +539,7 @@ internal static class WindowManager
 
             if (hwnd == IntPtr.Zero)
             {
-                CleanupProfile(browser.ProcessName, profileDir);
+                if (!HasLiveWindows(profileDir)) CleanupProfile(browser.ProcessName, profileDir);
                 return null;
             }
 
@@ -525,6 +550,7 @@ internal static class WindowManager
                 ProcessName = browser.ProcessName, Borderless = borderless,
                 ParentHwnd = parentHwnd, DesiredArea = area,
             };
+            lock (SharedWindows) SharedWindows.Add(win);
 
             PlaceWindow(win);
             Task.Run(() =>
@@ -555,10 +581,29 @@ internal static class WindowManager
         catch { }
     }
 
+    private static readonly List<LaunchedWindow> SharedWindows = new();
+
+    private static bool HasLiveWindows(string profileDir)
+    {
+        lock (SharedWindows)
+        {
+            SharedWindows.RemoveAll(w => w.Closed || !NativeMethods.IsWindow(w.Hwnd));
+            return SharedWindows.Any(w => string.Equals(w.ProfileDir, profileDir, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    public static IReadOnlyList<int> BrowserRootPids()
+    {
+        lock (SharedWindows)
+            return SharedWindows.Where(w => !w.Closed).Select(w => w.ProcessId).Distinct().ToList();
+    }
+
     public static void Close(LaunchedWindow win)
     {
         if (win.Attached) { Release(win); return; }
+        if (win.Native) return;
         win.Closed = true;
+        lock (SharedWindows) SharedWindows.Remove(win);
 
         try
         {
@@ -569,7 +614,21 @@ internal static class WindowManager
 
         Thread.Sleep(900);
 
-        CleanupProfile(win.ProcessName, win.ProfileDir);
+        if (HasLiveWindows(win.ProfileDir))
+        {
+            for (int i = 0; i < 6 && NativeMethods.IsWindow(win.Hwnd); i++)
+            {
+                NativeMethods.PostMessage(win.Hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                Thread.Sleep(500);
+            }
+            return;
+        }
+
+        lock (LaunchGate)
+        {
+            if (!HasLiveWindows(win.ProfileDir))
+                CleanupProfile(win.ProcessName, win.ProfileDir);
+        }
     }
 
     private static void KillProfileProcesses(string processName, string profileDir)
@@ -735,6 +794,11 @@ internal static class WindowManager
         {
             if (win.Attached && win.Closed) return;
             IntPtr hwnd = win.Hwnd;
+            if (win.Hidden)
+            {
+                if (NativeMethods.IsWindowVisible(hwnd)) NativeMethods.ShowWindow(hwnd, 0);
+                return;
+            }
             Rectangle area = win.DesiredArea;
             if (NativeMethods.IsIconic(hwnd))
                 NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
@@ -745,7 +809,7 @@ internal static class WindowManager
                 long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
                 long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME | NativeMethods.WS_POPUP |
                                     NativeMethods.WS_MINIMIZEBOX | NativeMethods.WS_MAXIMIZEBOX | NativeMethods.WS_MAXIMIZE);
-                if (win.ParentHwnd != IntPtr.Zero) want |= NativeMethods.WS_CHILD;
+                if (win.ParentHwnd != IntPtr.Zero) want |= NativeMethods.WS_CHILD | NativeMethods.WS_CLIPSIBLINGS;
                 if (want != cur)
                 {
                     NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want));
@@ -859,6 +923,34 @@ internal static class WindowManager
                 "user_pref(\"browser.fullscreen.autohide\", false);\n" +
                 "user_pref(\"browser.tabs.warnOnClose\", false);\n" +
                 "user_pref(\"browser.tabs.inTitlebar\", 0);\n" +
+                "user_pref(\"fission.autostart\", false);\n" +
+                "user_pref(\"dom.ipc.processCount\", 4);\n" +
+                "user_pref(\"dom.ipc.processCount.webIsolated\", 1);\n" +
+                "user_pref(\"dom.ipc.processPrelaunch.enabled\", false);\n" +
+                "user_pref(\"browser.tabs.unloadOnLowMemory\", true);\n" +
+                "user_pref(\"browser.sessionstore.interval\", 3600000);\n" +
+                "user_pref(\"browser.sessionstore.max_tabs_undo\", 0);\n" +
+                "user_pref(\"browser.sessionhistory.max_entries\", 10);\n" +
+                "user_pref(\"browser.cache.memory.capacity\", 32768);\n" +
+                "user_pref(\"media.memory_cache_max_size\", 16384);\n" +
+                "user_pref(\"network.prefetch-next\", false);\n" +
+                "user_pref(\"network.dns.disablePrefetch\", true);\n" +
+                "user_pref(\"network.predictor.enabled\", false);\n" +
+                "user_pref(\"browser.safebrowsing.malware.enabled\", false);\n" +
+                "user_pref(\"browser.safebrowsing.phishing.enabled\", false);\n" +
+                "user_pref(\"browser.safebrowsing.downloads.enabled\", false);\n" +
+                "user_pref(\"extensions.pocket.enabled\", false);\n" +
+                "user_pref(\"extensions.screenshots.disabled\", true);\n" +
+                "user_pref(\"browser.discovery.enabled\", false);\n" +
+                "user_pref(\"app.normandy.enabled\", false);\n" +
+                "user_pref(\"app.shield.optoutstudies.enabled\", false);\n" +
+                "user_pref(\"browser.ping-centre.telemetry\", false);\n" +
+                "user_pref(\"browser.newtabpage.enabled\", false);\n" +
+                "user_pref(\"layout.frame_rate\", 30);\n" +
+                (Profiles.HardwareAcceleration ? "" :
+                    "user_pref(\"layers.acceleration.disabled\", true);\n" +
+                    "user_pref(\"gfx.webrender.software\", true);\n" +
+                    "user_pref(\"media.hardware-video-decoding.enabled\", false);\n") +
                 "user_pref(\"full-screen-api.ignore-widgets\", true);\n" +
                 "user_pref(\"browser.link.open_newwindow\", 1);\n" +
                 "user_pref(\"browser.link.open_newwindow.restriction\", 0);\n" +
@@ -920,6 +1012,97 @@ internal static class WindowManager
     }
 }
 
+internal static class ResourceMonitor
+{
+    public static long BrowserMemory()
+    {
+        var roots = WindowManager.BrowserRootPids();
+        if (roots.Count == 0) return 0;
+        var children = new Dictionary<int, List<int>>();
+        IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);
+        if (snap == new IntPtr(-1)) return 0;
+        try
+        {
+            var e = new PROCESSENTRY32W { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32W>() };
+            if (Process32FirstW(snap, ref e))
+            {
+                do
+                {
+                    int ppid = (int)e.th32ParentProcessID;
+                    if (!children.TryGetValue(ppid, out List<int>? list)) children[ppid] = list = new List<int>();
+                    list.Add((int)e.th32ProcessID);
+                } while (Process32NextW(snap, ref e));
+            }
+        }
+        finally { NativeMethods.CloseHandle(snap); }
+
+        var all = new HashSet<int>(roots);
+        var queue = new Queue<int>(roots);
+        while (queue.Count > 0)
+            if (children.TryGetValue(queue.Dequeue(), out List<int>? kids))
+                foreach (int k in kids)
+                    if (all.Add(k)) queue.Enqueue(k);
+
+        long total = 0;
+        foreach (int pid in all)
+        {
+            try { using var pr = Process.GetProcessById(pid); total += pr.PrivateMemorySize64; }
+            catch { }
+        }
+        return total;
+    }
+
+    public static long PhysicalMemory()
+    {
+        var m = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
+        return GlobalMemoryStatusEx(ref m) ? (long)m.ullTotalPhys : 0;
+    }
+
+    public static string Format(long bytes) =>
+        bytes >= 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024 * 1024):0.0} GB" : $"{bytes / (1024 * 1024)} MB";
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32W
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W entry);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W entry);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX buffer);
+}
+
 internal static class WindowWatcher
 {
     private static NativeMethods.WinEventProc? _proc;
@@ -947,6 +1130,8 @@ internal static class WindowWatcher
 internal sealed record MonitorInfo(string DeviceName, int X, int Y, int Width, int Height, bool IsPrimary)
 {
     public string ShortName => DeviceName.Replace(@"\\.\", "");
+    public IReadOnlyList<MonitorInfo>? Members { get; init; }
+    public bool IsCombined => Members is { Count: > 1 };
 }
 
 internal static class MonitorEnumerator
@@ -1085,6 +1270,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr handle);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X, Y; }
 
@@ -1122,6 +1310,7 @@ internal static class NativeMethods
     public const long WS_CAPTION = 0x00C00000;
     public const long WS_THICKFRAME = 0x00040000;
     public const long WS_CHILD = 0x40000000;
+    public const long WS_CLIPSIBLINGS = 0x04000000;
     public const long WS_POPUP = unchecked((long)0x80000000);
 
     [StructLayout(LayoutKind.Sequential)]

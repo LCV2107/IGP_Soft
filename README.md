@@ -98,7 +98,7 @@ Todo se maneja desde **una sola ventana**. El menú de la izquierda cambia la p�
 | **▤ Galería** | Tus imágenes y videos (ver punto 12). |
 | **★ Perfiles** | Guardar y abrir configuraciones completas de pantallas (ver punto 8). |
 | **⇪ Exportar y copias** | .zip, versión portable, copias de seguridad y restaurar (ver punto 11). |
-| **⚙ Ajustes** | Navegador, vista previa, pantalla principal, qué abrir al iniciar y sesiones guardadas. Todo se aplica al instante. |
+| **⚙ Ajustes** | Navegador, vista previa, pantalla principal, atajos de teclado, rendimiento, qué abrir al iniciar y sesiones guardadas. Todo se aplica al instante. |
 
 Botones rápidos de la página **Pantallas**:
 
@@ -106,11 +106,38 @@ Botones rápidos de la página **Pantallas**:
 |-------|----------------|
 | **▶ Abrir en orden** | Llena todas las zonas de una vez con los enlaces de la lista, en orden. |
 | **▦ Dividir todos…** | Aplica la misma grilla a todos los monitores (ver punto 3). |
+| **⧉ Combinar monitores** | Une varios monitores en una sola pantalla grande (ver abajo). |
 | **◎ Identificar monitores** | Muestra el número de cada monitor sobre la pantalla real. |
 | **⟳ Actualizar** | Vuelve a detectar los monitores (se hace solo al conectar o desconectar uno). |
 | **✖ Cerrar todas** | Quita todo lo que se está mostrando. |
 
 Para no usar la laptop como pantalla de monitoreo, activa en **Ajustes** *No usar la pantalla principal*. Para omitir cualquier otro monitor, haz clic en su cuadro y elige **Omitir esta pantalla**.
+
+### Cambiar el número de los monitores
+
+Los monitores se numeran como los numera Windows. Para cambiarlo, **arrastra un monitor sobre otro** en la página **Pantallas**: el de destino se pinta de azul con *«⇄ Intercambiar con el monitor N»* y, al soltar, intercambian sus números.
+
+El nuevo orden se guarda y se usa en todo: los nombres «Monitor 1 / 2…», **Identificar monitores**, **Abrir en orden**, la galería, los perfiles y los títulos en Alt+Tab. La posición de cada cuadro no cambia (sigue mostrando dónde está físicamente cada pantalla).
+
+Para volver al orden de Windows: clic en una zona → **↺ Restablecer numeración de monitores**.
+
+### Combinar monitores en una sola pantalla
+
+Puedes unir **dos o más monitores** para que funcionen como **una sola pantalla grande**. Por ejemplo, dos de 1920 × 1080 lado a lado forman una de 3840 × 1080: una página puede ocupar ambos, o puedes dividirla en zonas que crucen de un monitor a otro.
+
+1. En **Pantallas**, pulsa **⧉ Combinar monitores**.
+2. Haz clic en los monitores que quieres unir (se marcan en azul). Abajo se indica el tamaño de la pantalla resultante.
+3. Pulsa **Combinar seleccionados**.
+
+En el panel aparecen como un solo cuadro, **«Monitor N · Combinado (2)»**, y funciona como cualquier otro: lo divides con **⊞**, unes zonas, amplías una zona con los atajos y lo guardas en perfiles. **Identificar monitores** muestra el mismo número en cada pantalla física del grupo.
+
+Para volver a separarlos: clic en una zona → **⊟ Separar monitores combinados** (o **⧉ Combinar monitores → Separar todos**). Los perfiles recuerdan las combinaciones: al abrir un perfil, los monitores se combinan o separan solos según cómo estaban al guardarlo.
+
+> Los monitores combinados deben formar un **rectángulo sin huecos** (por ejemplo 2 lado a lado, 2 uno sobre otro o 4 en 2 × 2) y conviene que tengan la **misma resolución**. Al combinar, se cierra lo que estaba abierto en esos monitores. Si uno se desconecta, los demás vuelven a funcionar por separado hasta que se reconecte.
+
+### Cerrar solo un monitor
+
+Clic en cualquier zona de ese monitor → **✕ Cerrar todo en este monitor**. Se cierran solo sus zonas; los demás monitores siguen igual. (**✖ Cerrar todas**, arriba, cierra todos los monitores.)
 
 ## 7. Editar la lista de enlaces
 
@@ -223,6 +250,80 @@ Con el elemento elegido puedes:
 | **Abrir con el reproductor / visor** | Lo abre con el programa de Windows (útil para ver un video completo). También con doble clic. |
 | **Eliminar de Assets** | Lo borra. Si se usa en enlaces o perfiles, te avisa antes. |
 
+## 13. Ampliar una zona a todo el monitor (atajos de teclado)
+
+Cuando un monitor está dividido, puedes **ampliar una zona** para que ocupe **todo el monitor** y verla en detalle. Las demás zonas siguen funcionando detrás. Después la vuelves a su lugar.
+
+**Con el teclado** (funciona desde cualquier programa, aunque el panel esté oculto):
+
+1. Pon el mouse sobre la zona que quieres ver en grande.
+2. Pulsa el atajo:
+
+| Atajo | Qué hace |
+|-------|----------|
+| `Ctrl + Alt + Enter` | Amplía la zona que está bajo el mouse a todo el monitor. |
+| `Ctrl + Alt + Retroceso` | Vuelve a la grilla (cada zona a su lugar). |
+| `Ctrl + Alt + AvPág` | Amplía la zona siguiente de ese monitor. |
+| `Ctrl + Alt + RePág` | Amplía la zona anterior. |
+| `Ctrl + Alt + P` | Muestra u oculta el panel (también cuando está oculto en la bandeja). |
+
+**Con el mouse:** clic en la zona (en el panel) → **⤢ Ampliar a todo el monitor**. Para volver: clic → **⤡ Volver a la grilla**.
+
+En el panel, la zona ampliada se marca con la etiqueta amarilla **«Ampliada al monitor»** y las demás aparecen como **«detrás»**.
+
+**Cambiar los atajos:** en **⚙ Ajustes → Atajos de teclado**:
+
+1. Haz clic en el atajo que quieres cambiar (dice *Pulsa la combinación…*).
+2. Pulsa la nueva combinación. Debe incluir **Ctrl** o **Alt**.
+3. Se guarda al instante. Con **Retroceso** lo dejas *Sin asignar*; con **Esc** cancelas.
+
+También puedes asignar atajos a **Abrir en orden**, **Cerrar todas las ventanas** y **Cerrar todo en el monitor bajo el mouse** (vienen sin asignar). Si la combinación ya la usa otra acción, el programa pregunta si quieres pasársela; si la usa otro programa de Windows, aparece en rojo como **Ocupado**. **↺ Restaurar atajos predeterminados** vuelve a los de la tabla.
+
+> En teclados en español, `Ctrl + Alt` funciona como `AltGr`. Evita combinaciones con letras o números que escriben símbolos (por ejemplo `AltGr + Q` escribe **@**), porque dejarían de escribirse.
+
+## 14. Rendimiento y memoria
+
+IGP_Soft está pensado para muchas pantallas abiertas a la vez sin agotar la memoria del equipo:
+
+- **Un solo navegador para todas las zonas.** Cada zona es una ventana del mismo navegador, en lugar de un navegador completo por zona. Si cierras una zona, las demás siguen funcionando.
+- **Navegador «liviano».** Se desactivan servicios que no hacen falta para mostrar pantallas (telemetría, sincronización, actualizaciones de componentes, precarga de páginas) y se limita la cantidad de procesos internos.
+- **Imágenes sin navegador.** Las imágenes de tu PC (JPG, PNG, GIF, BMP) se muestran directamente en IGP_Soft, sin abrir un navegador. Los videos y las páginas web siguen usando el navegador.
+- **Lo que no se ve, no trabaja.** Cuando amplías una zona (punto 13), las de detrás se ocultan y el navegador deja de dibujarlas hasta que vuelves a la grilla.
+
+En la página **Pantallas**, el chip **Memoria navegador** muestra cuánta RAM usan las pantallas en este momento (también aparece en la tarjeta de estado del menú). Se pone **amarillo** si pasa de la mitad de la RAM del equipo.
+
+En **⚙ Ajustes → Rendimiento**:
+
+| Opción | Para qué sirve |
+|--------|----------------|
+| **Usar la tarjeta de video** | Viene activada. Desactívala solo si la tarjeta de video es débil o da problemas (se aplica al volver a abrir las pantallas). |
+| **Recargar** | *Nunca*, o *cada 6, 12 o 24 horas*. Cierra y vuelve a abrir todas las pantallas en el mismo lugar, para liberar la memoria que las páginas acumulan con los días. Útil en equipos que pasan días encendidos. |
+| **⟳ Recargar todo ahora** | Hace esa recarga en el momento. Las pantallas desaparecen unos segundos y vuelven solas. |
+
+## 15. Actualizaciones
+
+IGP_Soft revisa si hay una versión nueva al iniciar y cada 6 horas. **Nunca se actualiza solo:** te avisa y tú decides cuándo.
+
+Cuando hay una versión nueva:
+
+- Aparece un aviso junto al reloj y una barra azul en **Pantallas**: *«Hay una versión nueva de IGP_Soft»*.
+- Pulsa **Ver novedades y actualizar** (o haz clic en el aviso). Se abre **⚙ Ajustes → Actualizaciones** con lo que trae la versión nueva.
+- Pulsa **⇩ Descargar e instalar**. IGP_Soft descarga la versión, comprueba que el archivo esté intacto, guarda una copia de tus datos, se cierra y **vuelve a abrirse solo con las mismas pantallas**.
+- Tus enlaces, perfiles, ajustes, imágenes y sesiones **no se tocan**.
+
+Si no quieres actualizar todavía, cierra la barra con **✕**: no volverá a aparecer para esa versión (seguirá disponible en Ajustes).
+
+En **⚙ Ajustes → Actualizaciones** también puedes:
+
+| Opción | Para qué sirve |
+|--------|----------------|
+| **Canal** | **Estable**: solo versiones aprobadas (recomendado). **Experimental**: también versiones de prueba, para quien prueba las novedades antes. |
+| **Avisarme cuando haya una versión nueva** | Apágalo si no quieres avisos (puedes seguir buscando a mano). |
+| **⟳ Buscar actualizaciones** | Revisa en el momento. |
+| **↶ Volver a la versión anterior** | Si la versión nueva da problemas, vuelve a la que tenías con un clic. |
+
+> Si IGP_Soft está en una carpeta donde no se puede escribir (por ejemplo, una USB bloqueada), te ofrecerá abrir la página de descarga para actualizar a mano.
+
 ## Archivos junto al programa
 
 El programa guarda todo en la misma carpeta que `IGP_Soft.exe`. Si copias la carpeta completa a otra PC, se conservan tus enlaces, perfiles y ajustes:
@@ -234,4 +335,4 @@ El programa guarda todo en la misma carpeta que `IGP_Soft.exe`. Si copias la car
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
 | `Assets\` | Imágenes y videos que agregaste |
 | `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |
-| `Copias de seguridad\` | Copias automáticas hechas antes de restaurar |
+| `Copias de seguridad\` | Copias automáticas hechas antes de restaurar o actualizar |

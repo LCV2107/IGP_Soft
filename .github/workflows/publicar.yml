@@ -1,0 +1,66 @@
+name: Publicar versión
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    env:
+      RELEASES_REPO: ${{ vars.RELEASES_REPO || 'LCV2107/IGP_Soft-releases' }}
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preparar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Leer la versión de la etiqueta
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $pre = if ($version.Contains('-')) { 'true' } else { 'false' }
+          git fetch --force --tags
+          $notes = git for-each-ref "refs/tags/$tag" --format='%(contents)'
+          if ([string]::IsNullOrWhiteSpace($notes) -or $notes.Trim() -eq $tag) { $notes = "IGP_Soft $version" }
+          Set-Content -Path notas.md -Value $notes -Encoding utf8
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$pre" >> $env:GITHUB_OUTPUT
+
+      - name: Compilar el .exe portable
+        run: >-
+          dotnet publish IGP_Soft.csproj -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -o salida
+
+      - name: Preparar archivos y huella SHA-256
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $exe = "IGP_Soft-$version.exe"
+          Copy-Item salida/IGP_Soft.exe $exe
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  $exe" | Out-File -FilePath "$exe.sha256" -Encoding ascii -NoNewline
+
+      - name: Publicar en el repositorio de versiones
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $exe = "IGP_Soft-$version.exe"
+          $kind = if ("${{ steps.version.outputs.prerelease }}" -eq 'true') { '--prerelease' } else { '--latest' }
+          gh release create "v$version" $exe "$exe.sha256" --repo $env:RELEASES_REPO --title "IGP_Soft $version" --notes-file notas.md $kind

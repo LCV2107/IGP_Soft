@@ -15,7 +15,7 @@ internal static class ProjectFiles
     private static readonly string[] DataFiles =
         { "IGP_Soft.enlaces.txt", "IGP_Soft.perfiles.json", "IGP_Soft.config.txt" };
 
-    private static readonly string[] SkippedProgramExtensions = { ".pdb", ".tmp", ".zip" };
+    private static readonly string[] SkippedProgramExtensions = { ".pdb", ".tmp", ".zip", ".borrar" };
 
     private static readonly string[] StoredExtensions =
         { ".mp4", ".webm", ".ogv", ".ogg", ".mov", ".m4v", ".mkv", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".jfif", ".zip" };
@@ -40,6 +40,7 @@ internal static class ProjectFiles
                 string name = Path.GetFileName(full);
                 if (DataFiles.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
                 if (SkippedProgramExtensions.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase)) continue;
+                if (name.Equals("IGP_Soft.anterior.exe", StringComparison.OrdinalIgnoreCase)) continue;
                 list.Add(new ProjectFile(full, name));
             }
             AddFolder(list, RuntimesFolder);

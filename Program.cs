@@ -24,6 +24,14 @@ internal static class Program
             return;
         }
 
+        string? wait = args.FirstOrDefault(a => a.StartsWith("--esperar=", StringComparison.OrdinalIgnoreCase))?["--esperar=".Length..];
+        if (int.TryParse(wait, out int previousPid))
+        {
+            try { using var previous = System.Diagnostics.Process.GetProcessById(previousPid); previous.WaitForExit(30000); }
+            catch { }
+        }
+        Updater.CleanupAfterUpdate();
+
         _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out bool isNew);
         if (!isNew)
         {

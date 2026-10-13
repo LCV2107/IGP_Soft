@@ -36,6 +36,11 @@ internal sealed class MainForm : Form
     private readonly Chip _chipZones = new();
     private readonly Chip _chipOpen = new();
     private readonly Chip _chipLinks = new();
+    private readonly Chip _chipMemory = new();
+    private readonly System.Windows.Forms.Timer _maintenanceTimer = new() { Interval = 5000 };
+    private long _browserMemory;
+    private volatile bool _sampling;
+    private DateTime _lastReload = DateTime.Now;
     private Page _screensPage = null!;
     private LinksPage _linksPage = null!;
     private GalleryPage _galleryPage = null!;
@@ -77,10 +82,18 @@ internal sealed class MainForm : Form
             if (_chkPreview.Checked) CapturePreviews();
         };
         _previewTimer.Start();
+        _maintenanceTimer.Tick += (_, _) => Maintenance();
+        _maintenanceTimer.Start();
         WindowWatcher.Start(OnWindowMoved);
         AssetStore.Moved += OnAssetsMoved;
 
         Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
+        Updater.Found += OnUpdateFound;
+        Shown += async (_, _) =>
+        {
+            await Task.Delay(15000);
+            await CheckForUpdatesQuietly();
+        };
 
         FormClosing += (_, e) =>
         {
@@ -93,6 +106,10 @@ internal sealed class MainForm : Form
         FormClosed += (_, _) =>
         {
             _previewTimer.Stop();
+            _maintenanceTimer.Stop();
+            Updater.Found -= OnUpdateFound;
+            Hotkeys.Changed -= ReRegisterHotkeys;
+            Hotkeys.Unregister(Handle);
             WindowWatcher.Stop();
             AssetStore.Moved -= OnAssetsMoved;
             _showReg?.Unregister(null);
@@ -138,25 +155,28 @@ internal sealed class MainForm : Form
         _chkSkipPrimary.Text = "No usar la pantalla principal (la laptop desde la que manejas el programa)";
         _chkSkipPrimary.CheckedChanged += (_, _) => { _skipPrimaryTouched = true; ApplySkipPrimary(); SaveLastSession(); };
 
-        _screensPage = new Page("Pantallas", "Haz clic en una zona para elegir qué mostrar. Con ▦ divides un monitor o unes zonas.");
+        _screensPage = new Page("Pantallas", "Clic en una zona para elegir qué mostrar  ·  ⊞ para dividir  ·  arrastra un monitor sobre otro para cambiar su número.");
         ModernButton gridAll = Page.ToolButton("▦  Dividir todos", () => { });
         gridAll.Click += (_, _) => ShowGridPickerForAll(gridAll);
         FlowLayoutPanel actions = Page.ToolBar(
             Page.ToolButton("▶  Abrir en orden", AutoAssignInOrder, primary: true),
             gridAll,
             Page.ToolButton("◎  Identificar", IdentifyMonitors),
+            Page.ToolButton("⧉  Combinar monitores", ShowCombine),
             Page.ToolButton("⟳  Actualizar", ReloadMonitors),
             Page.ToolButton("✕  Cerrar todas", CloseAll));
 
         var chips = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, WrapContents = false, BackColor = Theme.Background };
-        foreach (Chip c in new[] { _chipBrowser, _chipMonitors, _chipZones, _chipOpen, _chipLinks }) chips.Controls.Add(c);
+        foreach (Chip c in new[] { _chipBrowser, _chipMonitors, _chipZones, _chipOpen, _chipMemory, _chipLinks }) chips.Controls.Add(c);
 
         _canvas.Dock = DockStyle.Fill;
         _canvas.BackColor = Theme.Background;
         _canvas.Padding = new Padding(8, 12, 8, 8);
         _canvas.Resize += (_, _) => RelayoutTiles();
+        BuildUpdateBanner();
         _screensPage.Body.Controls.Add(_canvas);
         _screensPage.Body.Controls.Add(chips);
+        _screensPage.Body.Controls.Add(_updateBanner);
         _screensPage.Body.Controls.Add(_info);
         _screensPage.Body.Controls.Add(actions);
 
@@ -173,7 +193,7 @@ internal sealed class MainForm : Form
             ShowPage(_screensPage);
         });
         _exportPage = new ExportPage(() => { CloseAllWindows(); return true; }, AfterRestore);
-        _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary);
+        _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary, () => ReloadAll(manual: true), RestartForUpdate);
 
         var side = new Panel { Dock = DockStyle.Left, Width = 236, BackColor = Theme.Sidebar };
         var brand = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Sidebar };
@@ -246,7 +266,10 @@ internal sealed class MainForm : Form
         using (var b = new SolidBrush(dot)) g.FillEllipse(b, card.X + 14, card.Y + 17, 9, 9);
         string state = _browser is null ? "Sin navegador" : open > 0 ? $"{open} pantalla(s) en vivo" : "Sin pantallas abiertas";
         TextRenderer.DrawText(g, state, Theme.SmallBold, new Point((int)card.X + 30, (int)card.Y + 12), Color.White);
-        TextRenderer.DrawText(g, $"{_monitors.Count} monitor(es) · {_browser?.Name ?? "—"}", Theme.Small,
+        string second = _browserMemory > 0
+            ? $"{ResourceMonitor.Format(_browserMemory)} · {_browser?.Name ?? "—"}"
+            : $"{_monitors.Count} monitor(es) · {_browser?.Name ?? "—"}";
+        TextRenderer.DrawText(g, second, Theme.Small,
             new Point((int)card.X + 30, (int)card.Y + 32), Theme.SidebarMuted);
     }
 
@@ -407,7 +430,7 @@ internal sealed class MainForm : Form
     {
         CloseIdentifyForms();
 
-        List<MonitorInfo> current = MonitorEnumerator.GetOrdered();
+        List<MonitorInfo> current = MonitorGroups.Apply(MonitorEnumerator.GetOrdered());
         var currentDevices = current.Select(m => m.DeviceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (MonitorTile missing in _tiles.Where(t => !currentDevices.Contains(t.Monitor.DeviceName)).ToList())
             CloseTileWindows(missing);
@@ -419,7 +442,7 @@ internal sealed class MainForm : Form
         foreach (MonitorTile t in _tiles) { _canvas.Controls.Remove(t); t.Dispose(); }
         _tiles.Clear();
 
-        _monitors = current;
+        _monitors = SavedOrder(current);
 
         if (!_skipPrimaryTouched)
             _chkSkipPrimary.Checked = _monitors.Count > LinkStore.Links.Count;
@@ -443,6 +466,8 @@ internal sealed class MainForm : Form
             tile.SegmentActivated += ShowSegmentMenu;
             tile.MonitorMenuRequested += ShowMonitorMenu;
             tile.GridRequested += ShowGridPicker;
+            tile.DragMoved += OnTileDragMoved;
+            tile.DragDropped += OnTileDropped;
             _tiles.Add(tile);
             _canvas.Controls.Add(tile);
 
@@ -451,13 +476,152 @@ internal sealed class MainForm : Form
                 surface.Place(m);
                 foreach (Segment s in tile.Segments)
                     if (s.Launched is not null)
-                        WindowManager.Reposition(s.Launched, ToSurfaceArea(tile, s.Area));
+                        WindowManager.Reposition(s.Launched, AreaOf(tile, s));
             }
         }
 
         ApplySkipPrimary();
         RelayoutTiles();
         UpdateInfo();
+    }
+
+    private const string OrderKey = "ordenMonitores";
+
+    private static List<MonitorInfo> SavedOrder(List<MonitorInfo> current)
+    {
+        string[] saved = (Config.Get(OrderKey) ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries);
+        var ordered = saved.Select(d => current.FirstOrDefault(m => m.DeviceName.Equals(d, StringComparison.OrdinalIgnoreCase)))
+                           .OfType<MonitorInfo>().ToList();
+        ordered.AddRange(current.Where(m => !ordered.Contains(m)));
+        return ordered;
+    }
+
+    private MonitorTile? TileAtScreen(Point screen, MonitorTile? except)
+    {
+        Point p = _canvas.PointToClient(screen);
+        return _tiles.FirstOrDefault(t => t != except && t.Bounds.Contains(p));
+    }
+
+    private void OnTileDragMoved(MonitorTile source, Point screen)
+    {
+        MonitorTile? target = TileAtScreen(screen, source);
+        foreach (MonitorTile t in _tiles)
+        {
+            bool on = t == target;
+            if (t.DropTarget == on) continue;
+            t.DropTarget = on;
+            t.Invalidate();
+        }
+    }
+
+    private void OnTileDropped(MonitorTile source, Point screen)
+    {
+        MonitorTile? target = TileAtScreen(screen, source);
+        foreach (MonitorTile t in _tiles.Where(t => t.DropTarget)) { t.DropTarget = false; t.Invalidate(); }
+        if (target is null) return;
+        (source.Number, target.Number) = (target.Number, source.Number);
+        ApplyNumbering();
+    }
+
+    private void ApplyNumbering()
+    {
+        _tiles.Sort((a, b) => a.Number.CompareTo(b.Number));
+        _monitors = _tiles.Select(t => t.Monitor).ToList();
+        Config.Set(OrderKey, string.Join("|", _tiles.Select(t => t.Monitor.DeviceName)));
+        foreach (MonitorTile t in _tiles)
+        {
+            if (_surfaces.TryGetValue(t.Monitor.DeviceName, out DisplaySurface? surface) && !surface.IsDisposed)
+                surface.Number = t.Number;
+            t.Invalidate();
+        }
+        UpdateInfo();
+        SaveLastSession();
+    }
+
+    private static int NaturalIndex(MonitorInfo m, List<string> physical)
+    {
+        var members = m.Members ?? new[] { m };
+        return members.Select(x => physical.FindIndex(d => d.Equals(x.DeviceName, StringComparison.OrdinalIgnoreCase)))
+                      .Where(i => i >= 0).DefaultIfEmpty(99).Min();
+    }
+
+    private List<MonitorTile> NaturalOrder()
+    {
+        var physical = MonitorEnumerator.GetOrdered().Select(m => m.DeviceName).ToList();
+        return _tiles.OrderBy(t => NaturalIndex(t.Monitor, physical)).ToList();
+    }
+
+    private void ResetNumbering()
+    {
+        List<MonitorTile> natural = NaturalOrder();
+        for (int i = 0; i < natural.Count; i++) natural[i].Number = i + 1;
+        ApplyNumbering();
+        Config.Set(OrderKey, "");
+    }
+
+    private bool HasCustomNumbering() => !string.IsNullOrEmpty(Config.Get(OrderKey)) &&
+        !_tiles.SequenceEqual(NaturalOrder());
+
+    private void ShowCombine()
+    {
+        List<MonitorInfo> physical = MonitorEnumerator.GetOrdered();
+        using var f = new CombineForm(physical);
+        if (f.ShowDialog(this) != DialogResult.OK) return;
+        SetGroups(f.Result);
+    }
+
+    private void SeparateMonitors(MonitorTile tile)
+    {
+        if (!tile.Monitor.IsCombined) return;
+        if (tile.Segments.Any(s => s.Busy) &&
+            MessageBox.Show(this, "Se cerrará lo que está abierto en esta pantalla combinada. ¿Separar los monitores?", "Separar monitores",
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+            return;
+        var members = MonitorGroups.MembersOf(tile.Monitor.DeviceName);
+        SetGroups(MonitorGroups.Saved().Where(g => !g.SequenceEqual(members, StringComparer.OrdinalIgnoreCase)).ToList());
+    }
+
+    private void SetGroups(List<List<string>> groups)
+    {
+        MonitorGroups.Save(groups);
+        ReloadMonitors();
+        SaveLastSession();
+    }
+
+    private void SyncGroupsWith(LayoutProfile p)
+    {
+        var physical = MonitorEnumerator.GetOrdered().Select(m => m.DeviceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var wanted = p.Monitors.Where(m => MonitorGroups.IsGroupName(m.Device))
+                               .Select(m => MonitorGroups.MembersOf(m.Device).ToList())
+                               .Where(g => g.All(physical.Contains))
+                               .ToList();
+        var current = MonitorGroups.Saved();
+        string Key(IEnumerable<List<string>> gs) => string.Join(";", gs.Select(g => string.Join("+", g)).OrderBy(x => x));
+        if (Key(wanted) == Key(current)) return;
+        MonitorGroups.Save(wanted);
+        ReloadMonitors();
+    }
+
+    private void CloseMonitor(MonitorTile tile)
+    {
+        if (!tile.Segments.Any(s => s.Busy)) return;
+        CloseTileWindows(tile);
+        SaveLastSession();
+    }
+
+    private void AddMonitorItems(ContextMenuStrip menu, MonitorTile tile)
+    {
+        var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => CloseMonitor(tile))
+        {
+            Enabled = tile.Segments.Any(s => s.Busy),
+        };
+        Keys k = Hotkeys.Get(Hotkeys.Actions.First(a => a.Key == "cerrarmonitor"));
+        if (k != Keys.None) close.ShortcutKeyDisplayString = Hotkeys.Format(k);
+        menu.Items.Add(close);
+        if (tile.Monitor.IsCombined)
+            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(tile)));
+        if (HasCustomNumbering())
+            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => ResetNumbering()));
     }
 
     private void ApplySkipPrimary()
@@ -491,6 +655,7 @@ internal sealed class MainForm : Form
         _chipOpen.Set("En vivo", abiertas.ToString());
         _chipOpen.Fill = abiertas > 0 ? Theme.SuccessSoft : Theme.Surface;
         _chipLinks.Set("Enlaces", LinkStore.Links.Count.ToString());
+        UpdateMemoryChip();
         _sideStatus.Invalidate();
         foreach (MonitorTile t in _tiles)
             if (_surfaces.TryGetValue(t.Monitor.DeviceName, out DisplaySurface? surface) && !surface.IsDisposed)
@@ -560,7 +725,7 @@ internal sealed class MainForm : Form
             foreach (Segment s in t.Segments)
                 if (s.Launched is { } w && w.Hwnd == hwnd)
                 {
-                    WindowManager.Reposition(w, ToSurfaceArea(t, s.Area));
+                    WindowManager.Reposition(w, AreaOf(t, s));
                     return;
                 }
     }
@@ -568,11 +733,145 @@ internal sealed class MainForm : Form
     private void EnforceWindows()
     {
         if (_identifyForms.Any(f => !f.IsDisposed)) return;
+        foreach (MonitorTile t in _tiles) EnforceTile(t);
+    }
 
-        foreach (MonitorTile t in _tiles)
-            foreach (Segment s in t.Segments)
-                if (s.Launched is not null)
-                    WindowManager.Reposition(s.Launched, ToSurfaceArea(t, s.Area));
+    private static void EnforceTile(MonitorTile t)
+    {
+        foreach (Segment s in t.Segments)
+        {
+            if (s.Launched is null) continue;
+            s.Launched.Hidden = t.Maximized is not null && s != t.Maximized;
+            WindowManager.Reposition(s.Launched, AreaOf(t, s));
+        }
+    }
+
+    private void Maintenance()
+    {
+        if (!_sampling)
+        {
+            _sampling = true;
+            Task.Run(() =>
+            {
+                long mem = 0;
+                try { mem = ResourceMonitor.BrowserMemory(); }
+                catch { }
+                try
+                {
+                    BeginInvoke(() =>
+                    {
+                        _browserMemory = mem;
+                        _sampling = false;
+                        UpdateMemoryChip();
+                        _sideStatus.Invalidate();
+                    });
+                }
+                catch { _sampling = false; }
+            });
+        }
+
+        if (DateTime.Now - _lastUpdateCheck >= TimeSpan.FromHours(6)) _ = CheckForUpdatesQuietly();
+
+        int hours = Profiles.ReloadHours;
+        if (hours > 0 && DateTime.Now - _lastReload >= TimeSpan.FromHours(hours)) ReloadAll(manual: false);
+    }
+
+    private readonly Card _updateBanner = new() { Dock = DockStyle.Top, Height = 64, Visible = false, Elevated = false, Padding = new Padding(16, 12, 12, 12) };
+    private readonly Label _updateText = new();
+    private DateTime _lastUpdateCheck = DateTime.Now;
+    private string? _balloonShownFor;
+
+    private void BuildUpdateBanner()
+    {
+        _updateBanner.Fill = Theme.AccentSoft;
+        _updateText.Dock = DockStyle.Fill;
+        _updateText.TextAlign = ContentAlignment.MiddleLeft;
+        _updateText.Font = Theme.BodyBold;
+        _updateText.ForeColor = Theme.AccentPressed;
+        _updateText.BackColor = Theme.AccentSoft;
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 300, WrapContents = false, BackColor = Theme.AccentSoft, FlowDirection = FlowDirection.RightToLeft };
+        var dismiss = new ModernButton("", ButtonKind.Ghost, "✕") { Size = new Size(38, 38), Margin = new Padding(0) };
+        dismiss.Click += (_, _) =>
+        {
+            if (Updater.Available is { } u) Updater.Dismissed = u.Version.ToString();
+            _updateBanner.Visible = false;
+        };
+        var open = new ModernButton("Ver novedades y actualizar", ButtonKind.Primary, "⬆") { Margin = new Padding(0, 0, 8, 0) };
+        open.Size = open.GetPreferredSize(Size.Empty);
+        open.Click += (_, _) => ShowUpdates();
+        actions.Controls.Add(dismiss);
+        actions.Controls.Add(open);
+        _updateBanner.Controls.Add(_updateText);
+        _updateBanner.Controls.Add(actions);
+    }
+
+    private void ShowUpdates()
+    {
+        if (!Visible) ShowFromTray();
+        ShowPage(_settingsPage);
+        if (_settingsPage.UpdatesCard is { } card && card.Parent is ScrollableControl sc) sc.ScrollControlIntoView(card);
+    }
+
+    private async Task CheckForUpdatesQuietly()
+    {
+        _lastUpdateCheck = DateTime.Now;
+        if (!Updater.Notify) return;
+        try { await Updater.CheckAsync(raiseEvent: true); }
+        catch { }
+    }
+
+    private void OnUpdateFound(UpdateInfo u)
+    {
+        if (IsDisposed) return;
+        bool dismissed = Updater.Dismissed == u.Version.ToString();
+        _updateText.Text = $"⬆   Hay una versión nueva de IGP_Soft: {u.Version}" + (u.Version.IsPrerelease ? " (experimental)" : "") +
+                           $"  ·  tienes la {Updater.Current}";
+        _updateBanner.Visible = !dismissed;
+        if (!dismissed && Updater.Notify && _balloonShownFor != u.Version.ToString())
+        {
+            _balloonShownFor = u.Version.ToString();
+            _tray.BalloonTipClicked -= OnBalloonClicked;
+            _tray.BalloonTipClicked += OnBalloonClicked;
+            _tray.ShowBalloonTip(6000, "IGP_Soft — actualización disponible",
+                $"La versión {u.Version} está lista. Haz clic aquí para ver las novedades.", ToolTipIcon.Info);
+        }
+    }
+
+    private void OnBalloonClicked(object? sender, EventArgs e) => ShowUpdates();
+
+    private void RestartForUpdate()
+    {
+        var windows = _tiles.SelectMany(t => t.Segments).Where(s => s.Launched is not null).Select(s => s.Launched!).ToList();
+        CloseAllSurfaces();
+        foreach (LaunchedWindow window in windows) WindowManager.Close(window);
+        Updater.Restart($"--perfil=\"{ProfileStore.LastSession}\"");
+        _reallyExit = true;
+        Close();
+    }
+
+    private void UpdateMemoryChip()
+    {
+        long total = ResourceMonitor.PhysicalMemory();
+        bool high = total > 0 && _browserMemory > total / 2;
+        _chipMemory.Set("Memoria navegador", _browserMemory > 0 ? ResourceMonitor.Format(_browserMemory) : "—");
+        _chipMemory.Fill = high ? Color.FromArgb(254, 243, 199) : Theme.Surface;
+        _chipMemory.Invalidate();
+    }
+
+    private async void ReloadAll(bool manual)
+    {
+        _lastReload = DateTime.Now;
+        bool any = _tiles.Any(t => t.Segments.Any(s => s.Launched is { Attached: false, Native: false }));
+        if (!any)
+        {
+            if (manual)
+                MessageBox.Show(this, "No hay páginas abiertas para recargar.", "Recargar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        LayoutProfile snapshot = Snapshot("recarga");
+        CloseAllWindows();
+        await Task.Delay(3500);
+        if (!IsDisposed) ApplyProfile(snapshot);
     }
 
     private void ClearPreviews()
@@ -646,9 +945,102 @@ internal sealed class MainForm : Form
     protected override void WndProc(ref Message m)
     {
         const int WM_DISPLAYCHANGE = 0x007E;
+        if (m.Msg == Hotkeys.WM_HOTKEY)
+        {
+            int id = (int)m.WParam;
+            BeginInvoke(() => HandleHotkey(id));
+            return;
+        }
         base.WndProc(ref m);
         if (m.Msg == WM_DISPLAYCHANGE)
             BeginInvoke(ReloadMonitors);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Hotkeys.Register(Handle);
+        Hotkeys.Changed += ReRegisterHotkeys;
+    }
+
+    private void ReRegisterHotkeys()
+    {
+        if (IsHandleCreated && !IsDisposed) Hotkeys.Register(Handle);
+    }
+
+    private void HandleHotkey(int id)
+    {
+        switch (Hotkeys.Actions.FirstOrDefault(a => a.Id == id)?.Key)
+        {
+            case "ampliar":
+                if (TileUnderCursor() is { } t && SegmentUnderCursor(t) is { } s) Maximize(t, s);
+                break;
+            case "restaurar":
+                if (TileUnderCursor() is { } tr) RestoreGrid(tr);
+                else foreach (MonitorTile x in _tiles.Where(x => x.Maximized is not null).ToList()) RestoreGrid(x);
+                break;
+            case "siguiente":
+                if (TileUnderCursor() is { } tn) StepMaximize(tn, +1);
+                break;
+            case "anterior":
+                if (TileUnderCursor() is { } tp) StepMaximize(tp, -1);
+                break;
+            case "panel":
+                if (Visible && WindowState != FormWindowState.Minimized && ActiveForm == this) HideToTray();
+                else ShowFromTray();
+                break;
+            case "abrirorden":
+                AutoAssignInOrder();
+                break;
+            case "cerrartodas":
+                CloseAll();
+                break;
+            case "cerrarmonitor":
+                if (TileUnderCursor() is { } tc) CloseMonitor(tc);
+                break;
+        }
+    }
+
+    private MonitorTile? TileUnderCursor()
+    {
+        Point p = Cursor.Position;
+        return _tiles.FirstOrDefault(t => !t.Excluded &&
+            new Rectangle(t.Monitor.X, t.Monitor.Y, t.Monitor.Width, t.Monitor.Height).Contains(p));
+    }
+
+    private static Segment? SegmentUnderCursor(MonitorTile tile)
+    {
+        Point p = Cursor.Position;
+        return tile.Usable.FirstOrDefault(s => s.Area.Contains(p));
+    }
+
+    private void Maximize(MonitorTile tile, Segment seg)
+    {
+        if (seg.Disabled || !seg.Busy || tile.Segments.Count <= 1 || tile.Maximized == seg) return;
+        tile.Maximized = seg;
+        EnforceTile(tile);
+        if (seg.Launched is not null)
+            NativeMethods.SetWindowPos(seg.Launched.Hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        tile.Invalidate();
+    }
+
+    private void RestoreGrid(MonitorTile tile)
+    {
+        if (tile.Maximized is null) return;
+        tile.Maximized = null;
+        EnforceTile(tile);
+        tile.Invalidate();
+    }
+
+    private void StepMaximize(MonitorTile tile, int dir)
+    {
+        var candidates = tile.Usable.Where(s => s.Launched is not null).ToList();
+        if (candidates.Count == 0) candidates = tile.Usable.ToList();
+        if (candidates.Count == 0) return;
+        int i = tile.Maximized is null ? (dir > 0 ? 0 : candidates.Count - 1)
+              : (candidates.IndexOf(tile.Maximized) + dir + candidates.Count) % candidates.Count;
+        Maximize(tile, candidates[Math.Max(0, i)]);
     }
 
     private void ShowMonitorMenu(MonitorTile tile)
@@ -659,6 +1051,10 @@ internal sealed class MainForm : Form
         var incl = new ToolStripMenuItem(tile.Excluded ? "Incluir esta pantalla" : "Omitir esta pantalla") { Checked = tile.Excluded };
         incl.Click += (_, _) => ToggleExcluded(tile);
         menu.Items.Add(incl);
+        if (tile.Monitor.IsCombined)
+            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(tile)));
+        if (HasCustomNumbering())
+            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => ResetNumbering()));
         menu.Show(Cursor.Position);
     }
 
@@ -676,6 +1072,16 @@ internal sealed class MainForm : Form
         string zona = seg.Disabled ? " · zona sin usar" : usable > 1 ? $" · zona {tile.DisplayNumber(seg)}/{usable}" : "";
         menu.Items.Add(new ToolStripLabel($"Monitor {tile.Number}{zona}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
+
+        if (!seg.Disabled && tile.Usable.Count() > 1)
+        {
+            ToolStripMenuItem ampliar = tile.Maximized == seg
+                ? new ToolStripMenuItem("⤡  Volver a la grilla", null, (_, _) => RestoreGrid(tile))
+                : new ToolStripMenuItem("⤢  Ampliar a todo el monitor", null, (_, _) => Maximize(tile, seg)) { Enabled = seg.Busy };
+            HotkeyAction act = Hotkeys.Actions[tile.Maximized == seg ? 1 : 0];
+            if (Hotkeys.Get(act) != Keys.None) ampliar.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(act));
+            menu.Items.Add(ampliar);
+        }
 
         var disenar = new ToolStripMenuItem("▦  Diseñar grilla de este monitor…");
         disenar.Click += (_, _) => EditLayout(tile);
@@ -700,6 +1106,7 @@ internal sealed class MainForm : Form
         var omitir = new ToolStripMenuItem("Omitir esta pantalla");
         omitir.Click += (_, _) => ToggleExcluded(tile);
         menu.Items.Add(omitir);
+        AddMonitorItems(menu, tile);
         menu.Items.Add(new ToolStripSeparator());
 
         if (seg.Launched is not null || seg.Pending is not null)
@@ -805,9 +1212,23 @@ internal sealed class MainForm : Form
             return;
         }
 
+        if (!isWindow && NativeImage.Supports(link.Url) &&
+            NativeImage.Show(surface, link.Url, AreaOf(tile, seg)) is { } image)
+        {
+            seg.Link = link;
+            seg.Launched = image;
+            _openedUrls.Add(link.Url);
+            tile.Invalidate();
+            UpdateInfo();
+            SaveLastSession();
+            EnforceWindows();
+            KeepPanelInFront(panelActive);
+            return;
+        }
+
         if (isWindow)
         {
-            LaunchedWindow? attached = WindowManager.Attach(link.Url, ToSurfaceArea(tile, seg.Area), surface.Handle);
+            LaunchedWindow? attached = WindowManager.Attach(link.Url, AreaOf(tile, seg), surface.Handle);
             if (attached is null)
             {
                 CloseSurfaceIfEmpty(tile);
@@ -840,7 +1261,7 @@ internal sealed class MainForm : Form
 
         Browser browser = _browser!;
         bool keepData = Profiles.KeepData;
-        Rectangle area = ToSurfaceArea(tile, seg.Area);
+        Rectangle area = AreaOf(tile, seg);
         string tag = $"{tile.Monitor.ShortName}-{seg.Index}";
         IntPtr parent = surface.Handle;
 
@@ -981,8 +1402,9 @@ internal sealed class MainForm : Form
             seg.Link = m.Link;
             seg.Launched = m.Launched;
             seg.Pending = m.Pending;
+            if (seg.Launched is not null) seg.Launched.Hidden = false;
             if (seg.Launched is not null)
-                WindowManager.Reposition(seg.Launched, ToSurfaceArea(tile, seg.Area));
+                WindowManager.Reposition(seg.Launched, AreaOf(tile, seg));
         }
 
         CloseSurfaceIfEmpty(tile);
@@ -991,13 +1413,17 @@ internal sealed class MainForm : Form
 
     private void CloseSeg(MonitorTile tile, Segment seg)
     {
+        bool wasMax = tile.Maximized == seg;
+        if (wasMax) tile.Maximized = null;
         if (seg.Launched is not null)
         {
             LaunchedWindow w = seg.Launched;
             if (w.Attached) WindowManager.Release(w);
+            else if (w.Native) NativeImage.Dispose(w);
             else Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
         }
+        if (wasMax) EnforceTile(tile);
         seg.Pending = null;
         if (seg.Link is not null)
         {
@@ -1036,6 +1462,9 @@ internal sealed class MainForm : Form
                 NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         return surface;
     }
+
+    private static Rectangle AreaOf(MonitorTile tile, Segment seg) =>
+        tile.Maximized == seg ? new Rectangle(0, 0, tile.Monitor.Width, tile.Monitor.Height) : ToSurfaceArea(tile, seg.Area);
 
     private static Rectangle ToSurfaceArea(MonitorTile tile, Rectangle screenArea) =>
         new(screenArea.X - tile.Monitor.X, screenArea.Y - tile.Monitor.Y,
@@ -1161,6 +1590,7 @@ internal sealed class MainForm : Form
             _browsers.Any(b => b.Name.Equals(p.Browser, StringComparison.OrdinalIgnoreCase)))
             _cboBrowser.SelectedItem = _browsers.First(b => b.Name.Equals(p.Browser, StringComparison.OrdinalIgnoreCase)).Name;
         if (_browser is null) return;
+        SyncGroupsWith(p);
 
         var plan = new List<(MonitorTile Tile, MonitorLayout Layout)>();
         var used = new HashSet<MonitorTile>();
@@ -1214,10 +1644,9 @@ internal sealed class MainForm : Form
     {
         CloseIdentifyForms();
 
-        for (int i = 0; i < _monitors.Count; i++)
+        foreach ((MonitorTile tile, MonitorInfo m) in _tiles.SelectMany(t => (t.Monitor.Members ?? new[] { t.Monitor }).Select(p => (t, p))))
         {
-            MonitorInfo m = _monitors[i];
-            bool excl = _excludedDevices.Contains(m.DeviceName);
+            bool excl = tile.Excluded;
             const int w = 320, h = 240;
             var f = new Form
             {
@@ -1230,8 +1659,8 @@ internal sealed class MainForm : Form
                 Size = new Size(w, h),
             };
             using (var shape = Theme.Round(new RectangleF(0, 0, w, h), 28)) f.Region = new Region(shape);
-            int number = i + 1;
-            string caption = excl ? "Omitida" : m.IsPrimary ? "Monitor principal" : "Monitor";
+            int number = tile.Number;
+            string caption = excl ? "Omitida" : tile.Monitor.IsCombined ? "Pantalla combinada" : m.IsPrimary ? "Monitor principal" : "Monitor";
             f.Paint += (_, e) =>
             {
                 Theme.Smooth(e.Graphics);
@@ -1264,7 +1693,7 @@ internal sealed class MainForm : Form
 
     private sealed class DisplaySurface : Form
     {
-        public int Number { get; }
+        public int Number { get; set; }
 
         public DisplaySurface(MonitorInfo monitor, int number, Icon? icon)
         {
@@ -1324,10 +1753,12 @@ internal sealed class MainForm : Form
     {
         private const TextFormatFlags C = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
 
-        public int Number { get; }
+        public int Number { get; set; }
         public MonitorInfo Monitor { get; }
+        public bool DropTarget { get; set; }
         public bool Excluded { get; set; }
         public Bitmap? Preview { get; set; }
+        public Segment? Maximized { get; set; }
         public GridLayout Grid { get; private set; } = GridLayout.Uniform(1, 1);
         public int Cols => Grid.Cols;
         public int Rows => Grid.Rows;
@@ -1337,6 +1768,37 @@ internal sealed class MainForm : Form
         public event Action<MonitorTile, Segment>? SegmentActivated;
         public event Action<MonitorTile>? MonitorMenuRequested;
         public event Action<MonitorTile, Point>? GridRequested;
+        public event Action<MonitorTile, Point>? DragMoved;
+        public event Action<MonitorTile, Point>? DragDropped;
+
+        private Point _downAt;
+        private bool _pressed;
+        private bool _dragging;
+        private bool _suppressClick;
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left || _ctrlRect.Contains(e.Location)) return;
+            _downAt = e.Location;
+            _pressed = true;
+            _dragging = false;
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (_dragging)
+            {
+                _dragging = false;
+                _suppressClick = true;
+                Cursor = Cursors.Hand;
+                Capture = false;
+                DragDropped?.Invoke(this, PointToScreen(e.Location));
+                Invalidate();
+            }
+            _pressed = false;
+        }
 
         private bool _hover;
         private bool _hoverCtrl;
@@ -1368,6 +1830,7 @@ internal sealed class MainForm : Form
 
         public void Apply(GridLayout layout)
         {
+            Maximized = null;
             Grid = layout;
             Segments.Clear();
             var bounds = new Rectangle(Monitor.X, Monitor.Y, Monitor.Width, Monitor.Height);
@@ -1400,6 +1863,7 @@ internal sealed class MainForm : Form
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
+            if (_suppressClick) { _suppressClick = false; return; }
 
             if (!Excluded && _ctrlRect.Contains(e.Location))
             {
@@ -1416,6 +1880,19 @@ internal sealed class MainForm : Form
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_pressed && !_dragging && (Math.Abs(e.X - _downAt.X) > 10 || Math.Abs(e.Y - _downAt.Y) > 10))
+            {
+                _dragging = true;
+                Capture = true;
+                Cursor = Cursors.SizeAll;
+                _hoverSeg = null;
+                Invalidate();
+            }
+            if (_dragging)
+            {
+                DragMoved?.Invoke(this, PointToScreen(e.Location));
+                return;
+            }
             Segment? over = Excluded || _ctrlRect.Contains(e.Location) ? null : Segments.FirstOrDefault(s => s.TileRect.Contains(e.Location));
             bool onCtrl = !Excluded && _ctrlRect.Contains(e.Location);
             if (over == _hoverSeg && onCtrl == _hoverCtrl) return;
@@ -1464,6 +1941,23 @@ internal sealed class MainForm : Form
                         continue;
                     }
 
+                    if (Maximized is not null && s != Maximized)
+                    {
+                        Theme.FillRound(g, Color.FromArgb(150, 15, 23, 42), zr, 8);
+                        TextRenderer.DrawText(g, "detrás", Theme.Small, Rectangle.Round(zr), Color.FromArgb(148, 163, 184), C);
+                        continue;
+                    }
+                    if (s == Maximized)
+                    {
+                        Theme.DrawRound(g, Color.FromArgb(250, 204, 21), zr, 8, 2.5f);
+                        var badge = new RectangleF(zr.X + 8, zr.Y + 40, 150, 22);
+                        if (zr.Width > 170 && zr.Height > 90)
+                        {
+                            Theme.FillRound(g, Color.FromArgb(250, 204, 21), badge, 11);
+                            TextRenderer.DrawText(g, "⤢  Ampliada al monitor", Theme.SmallBold, Rectangle.Round(badge), Color.FromArgb(66, 32, 6), C);
+                        }
+                    }
+
                     Color fill = hover ? Color.FromArgb(preview ? 90 : 120, 37, 99, 235)
                                : s.Link is not null ? Color.FromArgb(preview ? 0 : 60, 37, 99, 235)
                                : Color.FromArgb(preview ? 40 : 18, 255, 255, 255);
@@ -1499,14 +1993,23 @@ internal sealed class MainForm : Form
             }
             g.ResetClip();
 
-            Color border = Excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
-            using (var bp = new Pen(border, _hover || live ? 2f : 1f))
+            if (_dragging || DropTarget)
+            {
+                g.SetClip(clip);
+                Theme.FillRound(g, _dragging ? Color.FromArgb(150, 255, 255, 255) : Color.FromArgb(150, 37, 99, 235), card, 14);
+                g.ResetClip();
+                string msg = _dragging ? "Suelta sobre otro monitor" : $"⇄  Intercambiar con el monitor {Number}";
+                TextRenderer.DrawText(g, msg, Theme.Section, Rectangle.Round(card), _dragging ? Theme.Text : Color.White, C);
+            }
+
+            Color border = DropTarget ? Color.FromArgb(147, 197, 253) : Excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
+            using (var bp = new Pen(border, DropTarget ? 3f : _hover || live ? 2f : 1f))
             {
                 if (Excluded) bp.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawPath(bp, clip);
             }
 
-            string name = $"Monitor {Number}" + (Monitor.IsPrimary ? " · Principal" : "");
+            string name = $"Monitor {Number}" + (Monitor.IsCombined ? $" · Combinado ({Monitor.Members!.Count})" : Monitor.IsPrimary ? " · Principal" : "");
             int nw = TextRenderer.MeasureText(name, Theme.SmallBold).Width + 20;
             var tag = new RectangleF(card.X + 10, card.Y + 10, nw, 24);
             Theme.FillRound(g, Excluded ? Color.FromArgb(203, 213, 225) : Color.FromArgb(215, 15, 23, 42), tag, 12);
