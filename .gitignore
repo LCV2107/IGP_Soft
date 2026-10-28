@@ -2,3 +2,5 @@ dist/
 dist-light/
 bin/
 obj/
+.claude/
+repomix*.xml
