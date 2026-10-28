@@ -2,11 +2,32 @@
 
 Programa para mostrar las pantallas de monitoreo del **IGP (Instituto Geofísico del Perú)** a pantalla completa, eligiendo qué se ve en cada monitor.
 
+## Descargar e instalar
+
+Descarga la última versión desde [Releases](https://github.com/LCV2107/IGP_Soft/releases/latest). Hay dos formas de usarlo; elige la que prefieras:
+
+| Archivo | Cuándo usarlo |
+|---------|---------------|
+| **`IGP_Soft-x.y.z.msi`** — instalado | Para el equipo de monitoreo de siempre. Se instala como cualquier programa: queda en el menú Inicio y en el escritorio, y se desinstala desde *Configuración → Aplicaciones*. |
+| **`IGP_Soft-x.y.z-portable.exe`** — portable | Para llevarlo en una USB o usarlo sin instalar nada. Cópialo a cualquier carpeta y ábrelo. |
+
+**Instalado:**
+
+1. Abre `IGP_Soft-x.y.z.msi`.
+2. Pulsa **Siguiente**, elige la carpeta (o deja la que viene) y pulsa **Instalar**. Windows pedirá permiso de administrador.
+3. Al terminar, deja marcada **Abrir IGP_Soft** y pulsa **Finalizar**.
+
+**Portable:**
+
+1. Copia `IGP_Soft-x.y.z-portable.exe` a una carpeta propia (por ejemplo, en una USB). Puedes renombrarlo como quieras, por ejemplo `IGP_Soft.exe`.
+2. Haz doble clic en él. No necesita instalación.
+
+> Si Windows muestra «Windows protegió su PC», pulsa **Más información → Ejecutar de todas formas**.
+
 ## 1. Abrir el programa
 
-1. Copia `IGP_Soft.exe` a cualquier carpeta (o a una memoria USB). No necesita instalación.
-2. Haz doble clic en `IGP_Soft.exe`.
-3. Aparece el panel: a la izquierda, el **menú**; a la derecha, la página **Pantallas** con **un cuadro por cada monitor**, ubicado como están físicamente. Cada cuadro muestra su número (el principal dice «Principal») y una vista previa de lo que muestra.
+1. Abre **IGP_Soft** desde el menú Inicio o el escritorio (instalado), o con doble clic en el `.exe` (portable).
+2. Aparece el panel: a la izquierda, el **menú**; a la derecha, la página **Pantallas** con **un cuadro por cada monitor**, ubicado como están físicamente. Cada cuadro muestra su número (el principal dice «Principal») y una vista previa de lo que muestra.
 
 > Si no sabes qué monitor es cuál, pulsa **Identificar monitores**: cada pantalla mostrará su número durante 3 segundos.
 
@@ -309,6 +330,7 @@ Cuando hay una versión nueva:
 - Aparece un aviso junto al reloj y una barra azul en **Pantallas**: *«Hay una versión nueva de IGP_Soft»*.
 - Pulsa **Ver novedades y actualizar** (o haz clic en el aviso). Se abre **⚙ Ajustes → Actualizaciones** con lo que trae la versión nueva.
 - Pulsa **⇩ Descargar e instalar**. IGP_Soft descarga la versión, comprueba que el archivo esté intacto, guarda una copia de tus datos, se cierra y **vuelve a abrirse solo con las mismas pantallas**.
+- Si lo tienes **instalado**, Windows pedirá permiso de administrador antes de instalar la versión nueva. Si lo tienes **portable**, se actualiza el mismo `.exe`.
 - Tus enlaces, perfiles, ajustes, imágenes y sesiones **no se tocan**.
 
 Si no quieres actualizar todavía, cierra la barra con **✕**: no volverá a aparecer para esa versión (seguirá disponible en Ajustes).
@@ -320,13 +342,16 @@ En **⚙ Ajustes → Actualizaciones** también puedes:
 | **Canal** | **Estable**: solo versiones aprobadas (recomendado). **Experimental**: también versiones de prueba, para quien prueba las novedades antes. |
 | **Avisarme cuando haya una versión nueva** | Apágalo si no quieres avisos (puedes seguir buscando a mano). |
 | **⟳ Buscar actualizaciones** | Revisa en el momento. |
-| **↶ Volver a la versión anterior** | Si la versión nueva da problemas, vuelve a la que tenías con un clic. |
+| **↶ Volver a la versión anterior** | Si la versión nueva da problemas, vuelve a la que tenías con un clic (solo en la versión portable). |
 
 > Si IGP_Soft está en una carpeta donde no se puede escribir (por ejemplo, una USB bloqueada), te ofrecerá abrir la página de descarga para actualizar a mano.
 
-## Archivos junto al programa
+## Dónde se guardan tus datos
 
-El programa guarda todo en la misma carpeta que `IGP_Soft.exe`. Si copias la carpeta completa a otra PC, se conservan tus enlaces, perfiles y ajustes:
+- **Instalado:** en `%LocalAppData%\IGP_Soft` (cada usuario de Windows tiene los suyos). Desinstalar el programa **no** borra tus datos.
+- **Portable:** en la misma carpeta que el `.exe`. Si copias la carpeta completa a otra PC, se conservan tus enlaces, perfiles y ajustes.
+
+Para pasar tus datos de una forma a la otra, usa **⇪ Exportar y copias → Copia de seguridad** en una y **Restaurar** en la otra.
 
 | Archivo | Contiene |
 |---------|----------|

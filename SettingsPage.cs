@@ -182,7 +182,8 @@ internal sealed class SettingsPage : Page
 
     private void RefreshUpdates()
     {
-        _updVersion.Text = $"Versión instalada: {Updater.Current}" + (Updater.Current.IsPrerelease ? "  (de prueba)" : "");
+        _updVersion.Text = $"Versión {Updater.Current}" + (Updater.Current.IsPrerelease ? " (de prueba)" : "") +
+                           (AppPaths.IsInstalled ? "  ·  instalada en este equipo" : "  ·  portable");
         UpdateInfo? u = Updater.Available;
         _btnInstall.Enabled = u is not null;
         _btnPage.Enabled = u is not null;
@@ -199,7 +200,7 @@ internal sealed class SettingsPage : Page
         {
             _updStatus.ForeColor = Theme.Accent;
             _updStatus.Text = $"⬆  Hay una versión nueva: {u.Version}" + (u.Version.IsPrerelease ? " (experimental)" : "") +
-                              $" · publicada el {u.Published:dd/MM/yyyy}" + (u.ExeSize > 0 ? $" · {u.ExeSize / (1024 * 1024)} MB" : "");
+                              $" · publicada el {u.Published:dd/MM/yyyy}" + (u.FileSize > 0 ? $" · {u.FileSize / (1024 * 1024)} MB" : "");
             _updNotes.Text = u.Notes.Length > 0 ? "Novedades:\n" + u.Notes : "Esta versión no incluye notas.";
         }
         string? prev = Updater.PreviousVersion;
@@ -237,10 +238,10 @@ internal sealed class SettingsPage : Page
     private async Task Install()
     {
         if (Updater.Available is not { } u) return;
-        if (!Updater.IsPortableBuild || !Updater.CanWriteHere())
+        if (!Updater.CanSelfUpdate)
         {
             if (MessageBox.Show(this,
-                    "Esta copia de IGP_Soft no se puede actualizar sola (no es la versión portable o la carpeta no permite escribir).\n\n" +
+                    "Esta copia de IGP_Soft no se puede actualizar sola (la carpeta del programa no permite escribir).\n\n" +
                     "¿Abrir la página de descarga para actualizar a mano?", "Actualizar",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                 Updater.OpenPage(u.PageUrl);
@@ -248,8 +249,10 @@ internal sealed class SettingsPage : Page
         }
         if (MessageBox.Show(this,
                 $"Se instalará la versión {u.Version}.\n\n" +
-                "IGP_Soft se cerrará y volverá a abrirse solo, con las mismas pantallas. Tus enlaces, perfiles, ajustes e imágenes " +
-                "se conservan (y antes se guarda una copia de seguridad). ¿Continuar?",
+                (AppPaths.IsInstalled
+                    ? "IGP_Soft se cerrará, Windows pedirá permiso para instalar la nueva versión y luego volverá a abrirse solo, con las mismas pantallas. "
+                    : "IGP_Soft se cerrará y volverá a abrirse solo, con las mismas pantallas. ") +
+                "Tus enlaces, perfiles, ajustes e imágenes se conservan (y antes se guarda una copia de seguridad). ¿Continuar?",
                 "Actualizar IGP_Soft", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
 

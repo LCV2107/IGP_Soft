@@ -117,7 +117,7 @@ internal sealed class ExportPage : Page
             source = AskFolder("Elija la carpeta de la copia o versión portable", remember: false);
         if (source is null) return;
         if (Directory.Exists(source) && string.Equals(Path.GetFullPath(source).TrimEnd(Path.DirectorySeparatorChar),
-                AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                AppPaths.DataDir, StringComparison.OrdinalIgnoreCase))
         {
             MessageBox.Show(this, "Esa es la carpeta actual del programa. Elija una copia o versión portable.", "Restaurar",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);

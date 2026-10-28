@@ -12,7 +12,7 @@ internal sealed record LinkDef(string Titulo, string Url);
 internal static class LinkStore
 {
     public static string FilePath { get; } =
-        Path.Combine(AppContext.BaseDirectory, "IGP_Soft.enlaces.txt");
+        Path.Combine(AppPaths.DataDir, "IGP_Soft.enlaces.txt");
 
     public static List<LinkDef> Links { get; private set; } = new();
 
@@ -273,7 +273,7 @@ internal static class Profiles
         return d;
     }
 
-    public static readonly string KeepRoot = Path.Combine(AppContext.BaseDirectory, "IGP_Soft_Datos");
+    public static readonly string KeepRoot = Path.Combine(AppPaths.DataDir, "IGP_Soft_Datos");
 
     public static bool KeepData
     {

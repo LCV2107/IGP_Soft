@@ -1,0 +1,65 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="IGP_Soft"
+           Manufacturer="IGP"
+           Version="$(var.Version)"
+           UpgradeCode="8200EADA-A77F-4B52-A0F1-C00B67738CFD"
+           Scope="perMachine"
+           Language="3082"
+           Codepage="1252">
+
+    <SummaryInformation Description="IGP_Soft — pantallas de monitoreo del IGP" Manufacturer="IGP" />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Ya hay una versión más reciente de IGP_Soft instalada en este equipo." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="IGP_Soft.ico" SourceFile="..\IGP_Soft.ico" />
+    <Property Id="ARPPRODUCTICON" Value="IGP_Soft.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/LCV2107/IGP_Soft" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/LCV2107/IGP_Soft#readme" />
+
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="CarpetaAnterior" Root="HKLM" Key="Software\IGP_Soft" Name="Carpeta" Type="raw" Bitness="always64" />
+    </Property>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="IGP_Soft" />
+    </StandardDirectory>
+
+    <Feature Id="Principal" Title="IGP_Soft" Level="1">
+      <Component Directory="INSTALLFOLDER" Bitness="always64">
+        <File Id="IGP_Soft.exe" Source="$(var.ProgramaDir)IGP_Soft.exe" KeyPath="yes">
+          <Shortcut Id="AccesoMenuInicio" Directory="ProgramMenuFolder" Name="IGP_Soft"
+                    Description="Pantallas de monitoreo del IGP" WorkingDirectory="INSTALLFOLDER"
+                    Icon="IGP_Soft.ico" Advertise="yes" />
+          <Shortcut Id="AccesoEscritorio" Directory="DesktopFolder" Name="IGP_Soft"
+                    Description="Pantallas de monitoreo del IGP" WorkingDirectory="INSTALLFOLDER"
+                    Icon="IGP_Soft.ico" Advertise="yes" />
+        </File>
+      </Component>
+      <Component Directory="INSTALLFOLDER" Bitness="always64">
+        <File Source="IGP_Soft.instalado" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Bitness="always64">
+        <RegistryValue Root="HKLM" Key="Software\IGP_Soft" Name="Carpeta" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="AbrirIGPSoft"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Abrir IGP_Soft" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#IGP_Soft.exe]" />
+    <CustomAction Id="AbrirIGPSoft" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" />
+
+  </Package>
+</Wix>

@@ -39,7 +39,7 @@ internal static class ProfileStore
 {
     public const string LastSession = "Última sesión";
 
-    public static readonly string FilePath = Path.Combine(AppContext.BaseDirectory, "IGP_Soft.perfiles.json");
+    public static readonly string FilePath = Path.Combine(AppPaths.DataDir, "IGP_Soft.perfiles.json");
 
     private static readonly JsonSerializerOptions Json = new()
     {

@@ -6,7 +6,7 @@ internal static class AssetStore
 {
     public const string FolderName = "Assets";
 
-    public static string Root => Path.Combine(AppContext.BaseDirectory, FolderName);
+    public static string Root => Path.Combine(AppPaths.DataDir, FolderName);
 
     public static event Action<IReadOnlyDictionary<string, string>>? Moved;
 
@@ -15,7 +15,7 @@ internal static class AssetStore
         s.StartsWith(FolderName + "/", StringComparison.OrdinalIgnoreCase);
 
     public static string Resolve(string s) =>
-        IsAssetPath(s) ? Path.Combine(AppContext.BaseDirectory, s.Replace('/', '\\')) : s;
+        IsAssetPath(s) ? Path.Combine(AppPaths.DataDir, s.Replace('/', '\\')) : s;
 
     public static bool IsExternalFile(string s)
     {

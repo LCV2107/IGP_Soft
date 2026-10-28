@@ -12,6 +12,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Description>Panel manual para abrir las pantallas de monitoreo del IGP, una por monitor, en modo kiosco.</Description>
+    <ApplicationIcon>IGP_Soft.ico</ApplicationIcon>
+    <DefaultItemExcludes>$(DefaultItemExcludes);instalador/**;salida/**</DefaultItemExcludes>
     <Version>1.0.0</Version>
     <Product>IGP_Soft</Product>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>

@@ -6,13 +6,11 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publicar:
     runs-on: windows-latest
-    env:
-      RELEASES_REPO: ${{ vars.RELEASES_REPO || 'LCV2107/IGP_Soft-releases' }}
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
@@ -27,18 +25,23 @@ jobs:
       - name: Leer la versión de la etiqueta
         id: version
         shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:TAG
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw "Etiqueta no válida: $tag" }
           $version = $tag.TrimStart('v')
+          $msi = $version.Split('-')[0]
           $pre = if ($version.Contains('-')) { 'true' } else { 'false' }
           git fetch --force --tags
           $notes = git for-each-ref "refs/tags/$tag" --format='%(contents)'
           if ([string]::IsNullOrWhiteSpace($notes) -or $notes.Trim() -eq $tag) { $notes = "IGP_Soft $version" }
           Set-Content -Path notas.md -Value $notes -Encoding utf8
           "version=$version" >> $env:GITHUB_OUTPUT
+          "msi=$msi" >> $env:GITHUB_OUTPUT
           "prerelease=$pre" >> $env:GITHUB_OUTPUT
 
-      - name: Compilar el .exe portable
+      - name: Compilar el programa
         run: >-
           dotnet publish IGP_Soft.csproj -c Release -r win-x64 --self-contained
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
@@ -46,21 +49,30 @@ jobs:
           -p:Version=${{ steps.version.outputs.version }}
           -o salida
 
-      - name: Preparar archivos y huella SHA-256
+      - name: Compilar el instalador .msi
+        shell: pwsh
+        run: >-
+          dotnet build instalador/IGP_Soft.Instalador.wixproj -c Release
+          -p:Version=${{ steps.version.outputs.msi }}
+          "-p:ProgramaDir=$env:GITHUB_WORKSPACE\salida"
+
+      - name: Preparar archivos y huellas SHA-256
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $exe = "IGP_Soft-$version.exe"
-          Copy-Item salida/IGP_Soft.exe $exe
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  $exe" | Out-File -FilePath "$exe.sha256" -Encoding ascii -NoNewline
+          New-Item -ItemType Directory publicar | Out-Null
+          Copy-Item salida/IGP_Soft.exe "publicar/IGP_Soft-$version-portable.exe"
+          Copy-Item instalador/bin/Release/IGP_Soft.msi "publicar/IGP_Soft-$version.msi"
+          foreach ($f in Get-ChildItem publicar) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($f.Name)" | Out-File -FilePath "$($f.FullName).sha256" -Encoding ascii -NoNewline
+          }
 
-      - name: Publicar en el repositorio de versiones
+      - name: Publicar la versión
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $exe = "IGP_Soft-$version.exe"
           $kind = if ("${{ steps.version.outputs.prerelease }}" -eq 'true') { '--prerelease' } else { '--latest' }
-          gh release create "v$version" $exe "$exe.sha256" --repo $env:RELEASES_REPO --title "IGP_Soft $version" --notes-file notas.md $kind
+          gh release create "v$version" (Get-ChildItem publicar).FullName --repo "${{ github.repository }}" --title "IGP_Soft $version" --notes-file notas.md $kind

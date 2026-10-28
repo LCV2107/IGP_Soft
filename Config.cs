@@ -2,9 +2,29 @@ using System.Text;
 
 namespace IGP_Soft;
 
+internal static class AppPaths
+{
+    public const string InstalledMarker = "IGP_Soft.instalado";
+
+    public static string ProgramDir { get; } = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+
+    public static bool IsInstalled { get; } = File.Exists(Path.Combine(ProgramDir, InstalledMarker));
+
+    public static string DataDir { get; } = CreateDataDir();
+
+    private static string CreateDataDir()
+    {
+        if (!IsInstalled) return ProgramDir;
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IGP_Soft");
+        try { Directory.CreateDirectory(dir); }
+        catch { }
+        return dir;
+    }
+}
+
 internal static class Config
 {
-    public static readonly string FilePath = Path.Combine(AppContext.BaseDirectory, "IGP_Soft.config.txt");
+    public static readonly string FilePath = Path.Combine(AppPaths.DataDir, "IGP_Soft.config.txt");
 
     private static readonly Dictionary<string, string> Values = new(StringComparer.OrdinalIgnoreCase);
 

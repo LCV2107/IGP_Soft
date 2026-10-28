@@ -20,7 +20,9 @@ internal static class ProjectFiles
     private static readonly string[] StoredExtensions =
         { ".mp4", ".webm", ".ogv", ".ogg", ".mov", ".m4v", ".mkv", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".jfif", ".zip" };
 
-    private static string Root => AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+    private static string Root => AppPaths.DataDir;
+
+    private static string ProgramRoot => AppPaths.ProgramDir;
 
     public static List<ProjectFile> Collect(bool includeProgram, bool includeSessions)
     {
@@ -35,15 +37,16 @@ internal static class ProjectFiles
 
         if (includeProgram)
         {
-            foreach (string full in Directory.EnumerateFiles(Root))
+            foreach (string full in Directory.EnumerateFiles(ProgramRoot))
             {
                 string name = Path.GetFileName(full);
                 if (DataFiles.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
+                if (name.Equals(AppPaths.InstalledMarker, StringComparison.OrdinalIgnoreCase)) continue;
                 if (SkippedProgramExtensions.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase)) continue;
                 if (name.Equals("IGP_Soft.anterior.exe", StringComparison.OrdinalIgnoreCase)) continue;
                 list.Add(new ProjectFile(full, name));
             }
-            AddFolder(list, RuntimesFolder);
+            AddFolder(list, RuntimesFolder, ProgramRoot);
         }
         return list;
     }
@@ -51,7 +54,8 @@ internal static class ProjectFiles
     public static bool IsInsideProgramFolder(string path)
     {
         string full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return full.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        return full.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+               full.StartsWith(ProgramRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string NewFolder(string parent, string baseName)
@@ -194,12 +198,13 @@ internal static class ProjectFiles
         return target;
     }
 
-    private static void AddFolder(List<ProjectFile> list, string folder)
+    private static void AddFolder(List<ProjectFile> list, string folder, string? root = null)
     {
-        string dir = Path.Combine(Root, folder);
+        root ??= Root;
+        string dir = Path.Combine(root, folder);
         if (!Directory.Exists(dir)) return;
         foreach (string full in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
-            list.Add(new ProjectFile(full, Path.GetRelativePath(Root, full)));
+            list.Add(new ProjectFile(full, Path.GetRelativePath(root, full)));
     }
 
     private static FileStream OpenShared(string path) =>

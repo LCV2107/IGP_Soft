@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace IGP_Soft;
@@ -50,17 +51,19 @@ internal sealed record SemVer(int Major, int Minor, int Patch, string[] Pre) : I
 }
 
 internal sealed record UpdateInfo(SemVer Version, string Title, string Notes, DateTime Published, string PageUrl,
-    string ExeUrl, long ExeSize, string? ShaUrl);
+    string FileName, string FileUrl, long FileSize, string? ShaUrl);
 
 internal enum UpdateChannel { Stable, Experimental }
 
 internal static class Updater
 {
-    public const string DefaultRepo = "LCV2107/IGP_Soft-releases";
+    public const string DefaultRepo = "LCV2107/IGP_Soft";
     private const string TmpName = "IGP_Soft.update.tmp";
     private const string OldName = "IGP_Soft.anterior.exe";
 
     private static readonly HttpClient Http = CreateClient();
+
+    private static string? _pendingInstaller;
 
     public static event Action<UpdateInfo>? Found;
 
@@ -94,8 +97,11 @@ internal static class Updater
     private static string ExeDir => Path.GetDirectoryName(ExePath)!;
 
     public static bool IsPortableBuild =>
+        !AppPaths.IsInstalled &&
         !File.Exists(Path.Combine(AppContext.BaseDirectory, "IGP_Soft.dll")) &&
-        Path.GetFileName(ExePath).Equals("IGP_Soft.exe", StringComparison.OrdinalIgnoreCase);
+        Path.GetExtension(ExePath).Equals(".exe", StringComparison.OrdinalIgnoreCase);
+
+    public static bool CanSelfUpdate => AppPaths.IsInstalled || (IsPortableBuild && CanWriteHere());
 
     public static bool CanWriteHere()
     {
@@ -113,6 +119,7 @@ internal static class Updater
     {
         get
         {
+            if (AppPaths.IsInstalled) return null;
             string old = Path.Combine(ExeDir, OldName);
             if (!File.Exists(old)) return null;
             try { return FileVersionInfo.GetVersionInfo(old).ProductVersion is { Length: > 0 } v ? SemVer.Parse(v)?.ToString() ?? v : "anterior"; }
@@ -132,13 +139,13 @@ internal static class Updater
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         string json = await Http.GetStringAsync($"https://api.github.com/repos/{Repo}/releases?per_page=30", cts.Token);
-        UpdateInfo? best = ParseReleases(json, Channel, Current);
+        UpdateInfo? best = ParseReleases(json, Channel, Current, AppPaths.IsInstalled);
         Available = best;
         if (best is not null && raiseEvent) Found?.Invoke(best);
         return best;
     }
 
-    public static UpdateInfo? ParseReleases(string json, UpdateChannel channel, SemVer current)
+    public static UpdateInfo? ParseReleases(string json, UpdateChannel channel, SemVer current, bool installed)
     {
         using JsonDocument doc = JsonDocument.Parse(json);
         UpdateInfo? best = null;
@@ -151,27 +158,49 @@ internal static class Updater
             if (v is null || v.CompareTo(current) <= 0) continue;
             if (best is not null && v.CompareTo(best.Version) <= 0) continue;
 
-            string? exeUrl = null, shaUrl = null;
+            string wanted = installed ? ".msi" : ".exe";
+            string? fileName = null, fileUrl = null;
             long size = 0;
+            var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (JsonElement a in r.GetProperty("assets").EnumerateArray())
             {
-                string name = a.GetProperty("name").GetString() ?? "";
+                string name = Path.GetFileName(a.GetProperty("name").GetString() ?? "");
                 string url = a.GetProperty("browser_download_url").GetString() ?? "";
-                if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) { exeUrl = url; size = a.GetProperty("size").GetInt64(); }
-                else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)) shaUrl = url;
+                if (!IsTrustedUrl(url)) continue;
+                if (name.EndsWith(wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    fileName = name; fileUrl = url; size = a.GetProperty("size").GetInt64();
+                }
+                else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)) hashes[name[..^".sha256".Length]] = url;
             }
-            if (exeUrl is null) continue;
+            if (fileName is null || fileUrl is null) continue;
+            string? shaUrl = hashes.TryGetValue(fileName, out string? h) ? h : null;
 
             string title = r.TryGetProperty("name", out JsonElement n) && n.GetString() is { Length: > 0 } t ? t : $"IGP_Soft {v}";
             string notes = r.TryGetProperty("body", out JsonElement b) ? b.GetString() ?? "" : "";
             DateTime published = r.TryGetProperty("published_at", out JsonElement d) && d.TryGetDateTime(out DateTime dt) ? dt.ToLocalTime() : DateTime.Now;
-            best = new UpdateInfo(v, title, notes.Trim(), published, r.GetProperty("html_url").GetString() ?? "", exeUrl, size, shaUrl);
+            best = new UpdateInfo(v, title, notes.Trim(), published, r.GetProperty("html_url").GetString() ?? "",
+                fileName, fileUrl, size, shaUrl);
         }
         return best;
     }
 
+    private static bool IsTrustedUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out Uri? u) && u.Scheme == Uri.UriSchemeHttps &&
+        u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase);
+
     public static async Task InstallAsync(UpdateInfo info, IProgress<(long done, long total)> progress)
     {
+        if (AppPaths.IsInstalled)
+        {
+            string folder = Path.Combine(Path.GetTempPath(), $"IGP_Soft_actualizacion_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(folder);
+            string installer = Path.Combine(folder, Path.GetFileName(info.FileName));
+            await DownloadVerifiedAsync(info, installer, progress);
+            BackupData("Antes de actualizar");
+            _pendingInstaller = installer;
+            return;
+        }
         if (!IsPortableBuild) throw new InvalidOperationException("Esta copia no es la versión portable de un solo archivo.");
         if (!CanWriteHere()) throw new UnauthorizedAccessException("No se puede escribir en la carpeta del programa.");
 
@@ -183,10 +212,10 @@ internal static class Updater
 
     public static async Task DownloadVerifiedAsync(UpdateInfo info, string tmp, IProgress<(long done, long total)> progress)
     {
-        using (HttpResponseMessage resp = await Http.GetAsync(info.ExeUrl, HttpCompletionOption.ResponseHeadersRead))
+        using (HttpResponseMessage resp = await Http.GetAsync(info.FileUrl, HttpCompletionOption.ResponseHeadersRead))
         {
             resp.EnsureSuccessStatusCode();
-            long total = resp.Content.Headers.ContentLength ?? info.ExeSize;
+            long total = resp.Content.Headers.ContentLength ?? info.FileSize;
             await using Stream src = await resp.Content.ReadAsStreamAsync();
             await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
             var buffer = new byte[81920];
@@ -246,7 +275,7 @@ internal static class Updater
 
     private static void BackupData(string label)
     {
-        string parent = Path.Combine(AppContext.BaseDirectory, ProjectFiles.BackupsFolder);
+        string parent = Path.Combine(AppPaths.DataDir, ProjectFiles.BackupsFolder);
         Directory.CreateDirectory(parent);
         ProjectFiles.CopyTo(ProjectFiles.Collect(includeProgram: false, includeSessions: false),
             ProjectFiles.NewFolder(parent, $"{label} {Current}"), null);
@@ -254,9 +283,31 @@ internal static class Updater
 
     public static void Restart(string args)
     {
+        if (_pendingInstaller is { } msi)
+        {
+            RunInstallerAndRestart(msi, args);
+            return;
+        }
         Process.Start(new ProcessStartInfo(ExePath, $"--esperar={Environment.ProcessId} {args}")
         {
             UseShellExecute = false, WorkingDirectory = ExeDir,
+        });
+    }
+
+    private static void RunInstallerAndRestart(string msi, string args)
+    {
+        static string Q(string s) => "'" + s.Replace("'", "''") + "'";
+        string msiArgs = $"/i \"{msi}\" /passive /norestart INSTALLFOLDER=\"{ExeDir}\"";
+        string script =
+            $"$p = Get-Process -Id {Environment.ProcessId} -ErrorAction SilentlyContinue; if ($p) {{ $p.WaitForExit(30000) | Out-Null }}; " +
+            $"Start-Process -FilePath 'msiexec.exe' -ArgumentList {Q(msiArgs)} -Wait; " +
+            $"Remove-Item -LiteralPath {Q(Path.GetDirectoryName(msi)!)} -Recurse -Force -ErrorAction SilentlyContinue; " +
+            $"Start-Process -FilePath {Q(ExePath)} -ArgumentList {Q(args)} -WorkingDirectory {Q(ExeDir)}";
+        string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        Process.Start(new ProcessStartInfo("powershell.exe",
+            $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
         });
     }
 
