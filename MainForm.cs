@@ -13,6 +13,7 @@ internal sealed class MainForm : Form
     private readonly Dictionary<string, DisplaySurface> _surfaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Form> _identifyForms = new();
     private readonly List<Task<LaunchedWindow?>> _pendingLaunches = new();
+    private readonly Dictionary<string, List<Task>> _windowTasks = new(StringComparer.OrdinalIgnoreCase);
     private bool _skipPrimaryTouched;
 
     private readonly Label _info = new();
@@ -1021,7 +1022,8 @@ internal sealed class MainForm : Form
         EnforceTile(tile);
         if (seg.Launched is not null)
             NativeMethods.SetWindowPos(seg.Launched.Hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0,
-                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE |
+                (seg.Launched.Attached ? NativeMethods.SWP_ASYNCWINDOWPOS : 0));
         tile.Invalidate();
     }
 
@@ -1228,22 +1230,46 @@ internal sealed class MainForm : Form
 
         if (isWindow)
         {
-            LaunchedWindow? attached = WindowManager.Attach(link.Url, AreaOf(tile, seg), surface.Handle);
-            if (attached is null)
+            var windowToken = new object();
+            seg.Pending = windowToken;
+            seg.Link = link;
+            _openedUrls.Add(link.Url);
+            tile.Invalidate();
+            UpdateInfo();
+
+            string device = tile.Monitor.DeviceName;
+            Rectangle windowArea = AreaOf(tile, seg);
+            IntPtr windowParent = surface.Handle;
+            Task<(LaunchedWindow? Win, string? Error)> attaching =
+                Task.Run(() => WindowManager.Attach(link.Url, windowArea, windowParent));
+            TrackWindowTask(device, attaching);
+            (LaunchedWindow? Win, string? Error) result;
+            try { result = await attaching; }
+            catch (Exception ex) { result = (null, ex.Message); }
+
+            (MonitorTile? wt, Segment? ws) = FindPending(windowToken);
+            if (IsDisposed || wt is null || ws is null)
             {
-                CloseSurfaceIfEmpty(tile);
+                if (result.Win is { } orphan) TrackWindowTask(device, WindowManager.ReleaseAsync(orphan));
+                return;
+            }
+
+            ws.Pending = null;
+            if (result.Win is null)
+            {
+                _openedUrls.Remove(link.Url);
+                ws.Link = null;
+                wt.Invalidate();
+                UpdateInfo();
+                CloseSurfaceIfEmpty(wt);
                 if (!quiet)
                     MessageBox.Show(this,
-                        $"No se pudo adjuntar «{link.Titulo.TrimStart('▣', ' ')}».\n\n" +
-                        "Puede que la ventana se haya cerrado, o que esa aplicación se ejecute como administrador " +
-                        "(en ese caso, abra IGP_Soft también como administrador).",
+                        $"No se pudo adjuntar «{link.Titulo.TrimStart('▣', ' ')}».\n\n{result.Error}",
                         "No se pudo adjuntar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            seg.Link = link;
-            seg.Launched = attached;
-            _openedUrls.Add(link.Url);
-            tile.Invalidate();
+            ws.Launched = result.Win;
+            wt.Invalidate();
             UpdateInfo();
             SaveLastSession();
             EnforceWindows();
@@ -1418,7 +1444,7 @@ internal sealed class MainForm : Form
         if (seg.Launched is not null)
         {
             LaunchedWindow w = seg.Launched;
-            if (w.Attached) WindowManager.Release(w);
+            if (w.Attached) TrackWindowTask(tile.Monitor.DeviceName, WindowManager.ReleaseAsync(w));
             else if (w.Native) NativeImage.Dispose(w);
             else Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
@@ -1473,15 +1499,50 @@ internal sealed class MainForm : Form
     private void CloseSurfaceIfEmpty(MonitorTile tile)
     {
         if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null)) return;
+        if (WindowTasksPending(tile.Monitor.DeviceName)) return;
         if (!_surfaces.Remove(tile.Monitor.DeviceName, out DisplaySurface? surface)) return;
         if (!surface.IsDisposed) surface.Close();
     }
 
+    private void TrackWindowTask(string device, Task task)
+    {
+        if (!_windowTasks.TryGetValue(device, out List<Task>? list))
+            _windowTasks[device] = list = new List<Task>();
+        list.Add(task);
+        task.ContinueWith(_ =>
+        {
+            try
+            {
+                if (IsDisposed) return;
+                BeginInvoke(() =>
+                {
+                    if (_windowTasks.TryGetValue(device, out List<Task>? l)) l.Remove(task);
+                    if (_tiles.FirstOrDefault(t => t.Monitor.DeviceName.Equals(device, StringComparison.OrdinalIgnoreCase)) is { } tile)
+                        CloseSurfaceIfEmpty(tile);
+                });
+            }
+            catch { }
+        }, TaskScheduler.Default);
+    }
+
+    private bool WindowTasksPending(string device) =>
+        _windowTasks.TryGetValue(device, out List<Task>? list) && list.Any(t => !t.IsCompleted);
+
     private void CloseAllSurfaces()
     {
-        foreach (Segment s in _tiles.SelectMany(t => t.Segments))
-            if (s.Launched is { Attached: true } w)
-                WindowManager.Release(w);
+        var releases = _tiles.SelectMany(t => t.Segments)
+                             .Where(s => s.Launched is { Attached: true })
+                             .Select(s => WindowManager.ReleaseAsync(s.Launched!))
+                             .Concat(_windowTasks.Values.SelectMany(l => l))
+                             .ToList();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (releases.Any(t => !t.IsCompleted) && sw.ElapsedMilliseconds < 5000)
+        {
+            Application.DoEvents();
+            Thread.Sleep(20);
+        }
+        if (releases.Any(t => !t.IsCompleted))
+            Diagnostico.Log("Al cerrar: alguna ventana adjunta no respondió a tiempo para volver al escritorio");
         foreach (DisplaySurface surface in _surfaces.Values.ToList())
             if (!surface.IsDisposed) surface.Close();
         _surfaces.Clear();

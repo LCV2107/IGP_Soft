@@ -334,6 +334,11 @@ internal sealed class LaunchedWindow
     public object? Tag { get; init; }
     public Rectangle Insets;
     public Rectangle AppliedRegion;
+    public int StyleFixes;
+    public bool ReportedHung;
+    public readonly object AreaGate = new();
+    public Rectangle PendingArea;
+    public bool AreaDirty;
 }
 
 internal sealed record OpenWindow(IntPtr Hwnd, int Pid, string ProcessName, string Title);
@@ -569,6 +574,15 @@ internal static class WindowManager
 
     public static void Reposition(LaunchedWindow win, Rectangle area)
     {
+        if (win.Attached)
+        {
+            lock (win.AreaGate)
+            {
+                win.PendingArea = area;
+                win.AreaDirty = true;
+            }
+            return;
+        }
         try
         {
             lock (win)
@@ -718,44 +732,95 @@ internal static class WindowManager
         return same.FirstOrDefault(w => w.Title == title) ?? same.FirstOrDefault();
     }
 
-    public static LaunchedWindow? Attach(string spec, Rectangle area, IntPtr parentHwnd)
+    public static (LaunchedWindow? Win, string? Error) Attach(string spec, Rectangle area, IntPtr parentHwnd)
     {
         OpenWindow? w = FindOpenWindow(spec);
-        if (w is null) return null;
+        if (w is null) return (null, "La ventana ya no está abierta.");
 
         IntPtr h = w.Hwnd;
-        if (NativeMethods.IsHungAppWindow(h)) return null;
+        Diagnostico.Log($"Adjuntar «{w.Title}» — {w.ProcessName} (pid {w.Pid}), {Diagnostico.Awareness(h)}");
+        var sw = Stopwatch.StartNew();
+        if (!Responds(h, 3000))
+        {
+            Diagnostico.Log($"  no respondió en {sw.ElapsedMilliseconds} ms: se cancela");
+            return (null, "La aplicación no responde (puede estar cargando). Espere a que termine y vuelva a intentarlo.");
+        }
+        Diagnostico.Log($"  responde en {sw.ElapsedMilliseconds} ms");
+
         bool maximized = NativeMethods.IsZoomed(h);
-        if (maximized || NativeMethods.IsIconic(h)) NativeMethods.ShowWindow(h, NativeMethods.SW_RESTORE);
-        NativeMethods.GetWindowRect(h, out NativeMethods.RECT r);
+        Rectangle original = NormalBounds(h);
+        if (maximized || NativeMethods.IsIconic(h)) NativeMethods.ShowWindowAsync(h, NativeMethods.SW_RESTORE);
 
         var win = new LaunchedWindow
         {
             ProcessId = w.Pid, Hwnd = h, ProfileDir = "", ProcessName = w.ProcessName, Borderless = true,
             ParentHwnd = parentHwnd, DesiredArea = area, Attached = true,
             OriginalStyle = NativeMethods.GetWindowLongPtr(h, NativeMethods.GWL_STYLE).ToInt64(),
-            OriginalBounds = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom),
+            OriginalBounds = original,
             WasMaximized = maximized,
         };
 
-        PlaceWindow(win);
+        sw.Restart();
+        PlaceWindow(win, probeMs: 3000);
+        Diagnostico.Log($"  integrada en {sw.ElapsedMilliseconds} ms");
         if (NativeMethods.GetParent(h) != parentHwnd)
         {
+            bool hung = win.ReportedHung;
+            Diagnostico.Log(hung ? "  dejó de responder mientras se integraba" : "  Windows no permitió integrarla");
             Release(win);
-            return null;
+            return (null, hung
+                ? "La aplicación dejó de responder mientras se adjuntaba. Espere a que termine de cargar y vuelva a intentarlo."
+                : "Windows no permitió integrar la ventana. Si esa aplicación se ejecuta como administrador, abra IGP_Soft también como administrador.");
         }
 
         lock (AttachedWindows) AttachedWindows.Add(win);
-        Task.Run(() =>
+        StartKeeper(win);
+        return (win, null);
+    }
+
+    public static bool Responds(IntPtr hwnd, uint timeoutMs) =>
+        NativeMethods.SendMessageTimeout(hwnd, 0, IntPtr.Zero, IntPtr.Zero,
+            NativeMethods.SMTO_ABORTIFHUNG | NativeMethods.SMTO_BLOCK, timeoutMs, out _) != IntPtr.Zero;
+
+    private static Rectangle NormalBounds(IntPtr h)
+    {
+        var wp = new NativeMethods.WINDOWPLACEMENT { length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>() };
+        if ((NativeMethods.IsZoomed(h) || NativeMethods.IsIconic(h)) && NativeMethods.GetWindowPlacement(h, ref wp))
+            return Rectangle.FromLTRB(wp.rcNormalPosition.Left, wp.rcNormalPosition.Top, wp.rcNormalPosition.Right, wp.rcNormalPosition.Bottom);
+        NativeMethods.GetWindowRect(h, out NativeMethods.RECT r);
+        return Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+    }
+
+    private static void StartKeeper(LaunchedWindow win)
+    {
+        var t = new Thread(() =>
         {
-            for (int i = 0; i < 10 && !win.Closed; i++)
+            while (!win.Closed && NativeMethods.IsWindow(win.Hwnd))
             {
-                Thread.Sleep(500);
-                if (NativeMethods.IsWindow(h)) PlaceWindow(win);
-                else break;
+                Thread.Sleep(400);
+                if (win.Closed) break;
+                Rectangle? next = null;
+                lock (win.AreaGate)
+                {
+                    if (win.AreaDirty)
+                    {
+                        next = win.PendingArea;
+                        win.AreaDirty = false;
+                    }
+                }
+                try
+                {
+                    lock (win)
+                    {
+                        if (next is { } a) win.DesiredArea = a;
+                    }
+                    PlaceWindow(win, probeMs: 2000);
+                }
+                catch { }
             }
-        });
-        return win;
+        })
+        { IsBackground = true, Name = "IGP_Soft ventana adjunta" };
+        t.Start();
     }
 
     private static readonly HashSet<LaunchedWindow> AttachedWindows = new();
@@ -765,6 +830,12 @@ internal static class WindowManager
         List<LaunchedWindow> all;
         lock (AttachedWindows) all = AttachedWindows.ToList();
         foreach (LaunchedWindow w in all) Release(w);
+    }
+
+    public static Task ReleaseAsync(LaunchedWindow win)
+    {
+        win.Closed = true;
+        return Task.Run(() => Release(win));
     }
 
     public static void Release(LaunchedWindow win)
@@ -778,33 +849,62 @@ internal static class WindowManager
 
             IntPtr h = win.Hwnd;
             if (!NativeMethods.IsWindow(h)) return;
-            NativeMethods.SetWindowRgn(h, IntPtr.Zero, false);
+            var sw = Stopwatch.StartNew();
             NativeMethods.SetParent(h, IntPtr.Zero);
+            NativeMethods.SetWindowRgn(h, IntPtr.Zero, false);
             NativeMethods.SetWindowLongPtr(h, NativeMethods.GWL_STYLE, new IntPtr(win.OriginalStyle));
             Rectangle b = win.OriginalBounds;
             NativeMethods.SetWindowPos(h, IntPtr.Zero, b.X, b.Y, b.Width, b.Height,
-                NativeMethods.SWP_NOZORDER | NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW);
-            if (win.WasMaximized) NativeMethods.ShowWindow(h, NativeMethods.SW_MAXIMIZE);
+                NativeMethods.SWP_NOZORDER | NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_SHOWWINDOW |
+                NativeMethods.SWP_ASYNCWINDOWPOS);
+            if (win.WasMaximized) NativeMethods.ShowWindowAsync(h, NativeMethods.SW_MAXIMIZE);
+            if (sw.ElapsedMilliseconds >= 200)
+                Diagnostico.Log($"«{win.ProcessName}» tardó {sw.ElapsedMilliseconds} ms en volver al escritorio");
         }
     }
 
-    private static void PlaceWindow(LaunchedWindow win)
+    private const int MaxStyleFixes = 6;
+
+    private static void PlaceWindow(LaunchedWindow win, uint probeMs = 0)
     {
         lock (win)
         {
             if (win.Attached && win.Closed) return;
             IntPtr hwnd = win.Hwnd;
+            bool foreign = win.Attached;
+            bool? responds = null;
+
+            bool Ready()
+            {
+                if (probeMs == 0) return true;
+                responds ??= Responds(hwnd, probeMs);
+                if (responds == false && !win.ReportedHung)
+                {
+                    win.ReportedHung = true;
+                    Diagnostico.Log($"«{win.ProcessName}» no responde: se espera sin tocar su ventana");
+                }
+                else if (responds == true && win.ReportedHung)
+                {
+                    win.ReportedHung = false;
+                    Diagnostico.Log($"«{win.ProcessName}» vuelve a responder");
+                }
+                return responds == true;
+            }
+
             if (win.Hidden)
             {
-                if (NativeMethods.IsWindowVisible(hwnd)) NativeMethods.ShowWindow(hwnd, 0);
+                if (NativeMethods.IsWindowVisible(hwnd) && Ready()) Show(hwnd, 0, foreign);
                 return;
             }
             Rectangle area = win.DesiredArea;
             if (NativeMethods.IsIconic(hwnd))
-                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+            {
+                if (!Ready()) return;
+                Show(hwnd, NativeMethods.SW_RESTORE, foreign);
+            }
 
             bool frameChanged = false;
-            if (win.Borderless)
+            if (win.Borderless && !(foreign && win.StyleFixes >= MaxStyleFixes))
             {
                 long cur = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE).ToInt64();
                 long want = cur & ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME | NativeMethods.WS_POPUP |
@@ -812,7 +912,10 @@ internal static class WindowManager
                 if (win.ParentHwnd != IntPtr.Zero) want |= NativeMethods.WS_CHILD | NativeMethods.WS_CLIPSIBLINGS;
                 if (want != cur)
                 {
-                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want));
+                    if (!Ready()) return;
+                    if (foreign && ++win.StyleFixes == MaxStyleFixes)
+                        Diagnostico.Log($"«{win.ProcessName}» vuelve a poner sus bordes una y otra vez: se dejan de forzar");
+                    Timed(win, "quitar bordes", () => NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE, new IntPtr(want)));
                     frameChanged = true;
                 }
 
@@ -821,14 +924,16 @@ internal static class WindowManager
                                         NativeMethods.WS_EX_CLIENTEDGE | NativeMethods.WS_EX_STATICEDGE);
                 if (wantEx != curEx)
                 {
-                    NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(wantEx));
+                    if (!Ready()) return;
+                    Timed(win, "quitar marco", () => NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE, new IntPtr(wantEx)));
                     frameChanged = true;
                 }
             }
 
             if (win.ParentHwnd != IntPtr.Zero && NativeMethods.GetParent(hwnd) != win.ParentHwnd)
             {
-                NativeMethods.SetParent(hwnd, win.ParentHwnd);
+                if (!Ready()) return;
+                Timed(win, "integrar en la pantalla", () => NativeMethods.SetParent(hwnd, win.ParentHwnd));
                 frameChanged = true;
             }
 
@@ -836,11 +941,13 @@ internal static class WindowManager
             if (!frameChanged && win.ParentHwnd != IntPtr.Zero &&
                 NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, target))
                 return;
+            if (!Ready()) return;
 
-            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOOWNERZORDER;
+            uint async = foreign ? NativeMethods.SWP_ASYNCWINDOWPOS : 0;
+            uint flags = NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW | NativeMethods.SWP_NOOWNERZORDER | async;
             if (frameChanged) flags |= NativeMethods.SWP_FRAMECHANGED;
             IntPtr order = win.ParentHwnd == IntPtr.Zero ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP;
-            NativeMethods.SetWindowPos(hwnd, order, target.X, target.Y, target.Width, target.Height, flags);
+            Timed(win, "colocar", () => NativeMethods.SetWindowPos(hwnd, order, target.X, target.Y, target.Width, target.Height, flags));
 
             if (win.ParentHwnd == IntPtr.Zero) return;
 
@@ -850,7 +957,7 @@ internal static class WindowManager
                 win.Insets = insets;
                 target = Expand(area, insets);
                 NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, target.X, target.Y, target.Width, target.Height,
-                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOOWNERZORDER);
+                    NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOOWNERZORDER | async);
             }
 
             var region = new Rectangle(insets.X, insets.Y, area.Width, area.Height);
@@ -860,11 +967,32 @@ internal static class WindowManager
                 IntPtr rgn = needsRegion
                     ? NativeMethods.CreateRectRgn(region.Left, region.Top, region.Right, region.Bottom)
                     : IntPtr.Zero;
-                if (NativeMethods.SetWindowRgn(hwnd, rgn, true) == 0 && rgn != IntPtr.Zero)
+                int applied = 0;
+                Timed(win, "recortar el borde", () => applied = NativeMethods.SetWindowRgn(hwnd, rgn, true));
+                if (applied == 0 && rgn != IntPtr.Zero)
                     NativeMethods.DeleteObject(rgn);
                 win.AppliedRegion = needsRegion ? region : Rectangle.Empty;
             }
         }
+    }
+
+    private static void Show(IntPtr hwnd, int cmd, bool async)
+    {
+        if (async) NativeMethods.ShowWindowAsync(hwnd, cmd);
+        else NativeMethods.ShowWindow(hwnd, cmd);
+    }
+
+    private static void Timed(LaunchedWindow win, string step, Action action)
+    {
+        if (!win.Attached)
+        {
+            action();
+            return;
+        }
+        var sw = Stopwatch.StartNew();
+        action();
+        if (sw.ElapsedMilliseconds >= 200)
+            Diagnostico.Log($"«{win.ProcessName}» tardó {sw.ElapsedMilliseconds} ms en: {step}");
     }
 
     private static Rectangle Expand(Rectangle area, Rectangle insets) =>
@@ -1241,6 +1369,37 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool IsHungAppWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
+        uint flags, uint timeout, out IntPtr result);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr value);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINDOWPLACEMENT
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
+    }
+
+    public const uint SWP_ASYNCWINDOWPOS = 0x4000;
+    public const uint SMTO_BLOCK = 0x0001;
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
 
     public delegate void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild,
         uint idEventThread, uint dwmsEventTime);
