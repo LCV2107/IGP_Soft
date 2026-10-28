@@ -22,6 +22,9 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Ejecutar las pruebas
+        run: dotnet test pruebas/IGP_Soft.Pruebas.csproj -c Release
+
       - name: Leer la versión de la etiqueta
         id: version
         shell: pwsh
