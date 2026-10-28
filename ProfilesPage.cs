@@ -12,6 +12,8 @@ internal sealed class ProfilesPage : Page
     private readonly ModernButton _btnDelete;
     private readonly Label _status = new();
 
+    public bool StartupLocal { get; init; } = true;
+
     public ProfilesPage(Func<string, LayoutProfile> snapshot, Action<LayoutProfile> open)
         : base("Perfiles", "Guarda cómo están las pantallas ahora y vuelve a abrirlas con un clic.")
     {
@@ -108,7 +110,7 @@ internal sealed class ProfilesPage : Page
 
         bool sel = (e.State & DrawItemState.Selected) != 0;
         bool last = ProfileStore.IsLastSession(p.Name);
-        bool auto = string.Equals(p.Name, Startup.Profile, StringComparison.OrdinalIgnoreCase);
+        bool auto = StartupLocal && string.Equals(p.Name, Startup.Profile, StringComparison.OrdinalIgnoreCase);
         var card = new RectangleF(e.Bounds.X + 1, e.Bounds.Y + 4, e.Bounds.Width - 3, e.Bounds.Height - 9);
         Theme.FillRound(g, sel ? Color.FromArgb(239, 246, 255) : Theme.Surface, card, 10);
         Theme.DrawRound(g, sel ? Theme.Accent : Theme.Border, card, 10, sel ? 1.6f : 1f);
@@ -187,7 +189,7 @@ internal sealed class ProfilesPage : Page
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
         ProfileStore.Remove(p.Name);
-        if (string.Equals(Startup.Profile, p.Name, StringComparison.OrdinalIgnoreCase))
+        if (StartupLocal && string.Equals(Startup.Profile, p.Name, StringComparison.OrdinalIgnoreCase))
             Startup.Profile = Startup.Nothing;
         _status.Text = "";
         RefreshList();

@@ -16,6 +16,10 @@ internal static class LinkStore
 
     public static List<LinkDef> Links { get; private set; } = new();
 
+    public static Action<List<LinkDef>>? Remote { get; set; }
+
+    public static void SetFromRemote(IEnumerable<LinkDef> items) => Links = items.ToList();
+
     private static readonly LinkDef[] Defaults =
     {
         new("Último sismo",                          "https://ultimosismo.igp.gob.pe/ultimo-sismo"),
@@ -50,6 +54,11 @@ internal static class LinkStore
 
     public static void Save()
     {
+        if (Remote is not null)
+        {
+            Remote(Links.ToList());
+            return;
+        }
         try
         {
             var sb = new StringBuilder();
@@ -1260,6 +1269,8 @@ internal sealed record MonitorInfo(string DeviceName, int X, int Y, int Width, i
     public string ShortName => DeviceName.Replace(@"\\.\", "");
     public IReadOnlyList<MonitorInfo>? Members { get; init; }
     public bool IsCombined => Members is { Count: > 1 };
+    public string HardwareId { get; init; } = "";
+    public string Id => HardwareId.Length > 0 ? HardwareId : DeviceName;
 }
 
 internal static class MonitorEnumerator
@@ -1279,7 +1290,10 @@ internal static class MonitorEnumerator
                     mi.rcMonitor.Top,
                     mi.rcMonitor.Right - mi.rcMonitor.Left,
                     mi.rcMonitor.Bottom - mi.rcMonitor.Top,
-                    (mi.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0));
+                    (mi.dwFlags & NativeMethods.MONITORINFOF_PRIMARY) != 0)
+                {
+                    HardwareId = HardwareIdOf(mi.szDevice),
+                });
             }
             return true;
         };
@@ -1290,6 +1304,28 @@ internal static class MonitorEnumerator
             .OrderBy(m => ExtractIndex(m.DeviceName))
             .ThenBy(m => m.DeviceName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public static string HardwareIdOf(string deviceName)
+    {
+        try
+        {
+            var dd = new NativeMethods.DISPLAY_DEVICE { cb = Marshal.SizeOf<NativeMethods.DISPLAY_DEVICE>() };
+            if (!NativeMethods.EnumDisplayDevices(deviceName, 0, ref dd, NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME)) return "";
+            return HardwareIdFromInterface(dd.DeviceID);
+        }
+        catch { return ""; }
+    }
+
+    public static string HardwareIdFromInterface(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        string[] parts = path.Split('#');
+        if (parts.Length < 3) return "";
+        string model = new string(parts[1].Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        if (model.Length == 0) return "";
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(parts[2].ToUpperInvariant()));
+        return $"MON-{model}-{Convert.ToHexString(hash, 0, 4)}";
     }
 
     private static int ExtractIndex(string deviceName)
@@ -1474,6 +1510,26 @@ internal static class NativeMethods
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool EnumDisplayDevices(string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    public const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct MONITORINFOEX

@@ -19,6 +19,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     private readonly System.Windows.Forms.Timer _guard = new() { Interval = 1500 };
     private readonly System.Windows.Forms.Timer _maintenance = new() { Interval = 5000 };
     private List<MonitorInfo> _monitors = new();
+    private List<string> _physicalOrder = new();
     private bool _skipPrimary;
     private bool _skipPrimaryTouched;
     private bool _applyingProfile;
@@ -36,8 +37,6 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                   ?? Browsers.FirstOrDefault();
     }
 
-    public event Action? Changed;
-    public event Action? MonitorsChanged;
     public event Action? SurfaceShown;
     public event Action? ZoneOpened;
     public event Action<Resultado>? Aviso;
@@ -54,7 +53,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     public bool AnyBusy => _pantallas.Any(t => t.Segments.Any(s => s.Launched is not null || s.Pending is not null));
     public bool IsOpen(string url) => _openedUrls.Contains(url);
 
-    public EstadoPantallas Estado => EstadoPantallas.Desde(_seq, Browser?.Name, _skipPrimary, _pantallas);
+    public EstadoPantallas Estado => new(
+        _seq, Environment.MachineName, Browser?.Name, Browsers.Select(b => b.Name).ToList(), _skipPrimary, HasCustomNumbering(),
+        _pantallas.Select(EstadoPantallas.MonitorDesde).ToList(), LinkStore.Links.ToList(), ProfileStore.Items.ToList());
+
+    public void Refresh() => Notify();
 
     public void Start()
     {
@@ -96,9 +99,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         if (_disposed) return;
         _seq++;
         foreach (PantallaMonitor t in _pantallas)
-            if (_surfaces.TryGetValue(t.Id, out DisplaySurface? surface) && !surface.IsDisposed)
+            if (_surfaces.TryGetValue(t.Device, out DisplaySurface? surface) && !surface.IsDisposed)
                 surface.SetContents(t.Usable.Where(s => s.Link is not null).Select(s => s.Link!.Titulo.TrimStart('▣', ' ')));
-        Changed?.Invoke();
         Cambio?.Invoke(Estado);
     }
 
@@ -140,15 +142,16 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
         List<MonitorInfo> current = MonitorGroups.Apply(MonitorEnumerator.GetOrdered());
         var currentDevices = current.Select(m => m.DeviceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (PantallaMonitor missing in _pantallas.Where(t => !currentDevices.Contains(t.Id)).ToList())
+        foreach (PantallaMonitor missing in _pantallas.Where(t => !currentDevices.Contains(t.Device)).ToList())
             CloseTileWindows(missing);
 
         var prev = new Dictionary<string, (GridLayout layout, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items)>();
         foreach (PantallaMonitor t in _pantallas)
-            prev[t.Id] = (t.Grid, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
+            prev[t.Device] = (t.Grid, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
         _pantallas.Clear();
 
         _monitors = SavedOrder(current);
+        _physicalOrder = MonitorEnumerator.GetOrdered().Select(m => m.DeviceName).ToList();
 
         if (!_skipPrimaryTouched)
         {
@@ -186,7 +189,6 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             }
         }
 
-        MonitorsChanged?.Invoke();
         ApplySkipPrimary();
     }
 
@@ -209,9 +211,9 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     {
         _pantallas.Sort((a, b) => a.Number.CompareTo(b.Number));
         _monitors = _pantallas.Select(t => t.Monitor).ToList();
-        Config.Set(OrderKey, string.Join("|", _pantallas.Select(t => t.Id)));
+        Config.Set(OrderKey, string.Join("|", _pantallas.Select(t => t.Device)));
         foreach (PantallaMonitor t in _pantallas)
-            if (_surfaces.TryGetValue(t.Id, out DisplaySurface? surface) && !surface.IsDisposed)
+            if (_surfaces.TryGetValue(t.Device, out DisplaySurface? surface) && !surface.IsDisposed)
                 surface.Number = t.Number;
         Notify();
         SaveLastSession();
@@ -224,11 +226,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                       .Where(i => i >= 0).DefaultIfEmpty(99).Min();
     }
 
-    private List<PantallaMonitor> NaturalOrder()
-    {
-        var physical = MonitorEnumerator.GetOrdered().Select(m => m.DeviceName).ToList();
-        return _pantallas.OrderBy(t => NaturalIndex(t.Monitor, physical)).ToList();
-    }
+    private List<PantallaMonitor> NaturalOrder() =>
+        _pantallas.OrderBy(t => NaturalIndex(t.Monitor, _physicalOrder)).ToList();
 
     public void ResetNumbering()
     {
@@ -250,7 +249,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     public void SeparateMonitors(PantallaMonitor tile)
     {
         if (!tile.Monitor.IsCombined) return;
-        var members = MonitorGroups.MembersOf(tile.Id);
+        var members = MonitorGroups.MembersOf(tile.Device);
         SetGroups(MonitorGroups.Saved().Where(g => !g.SequenceEqual(members, StringComparer.OrdinalIgnoreCase)).ToList());
     }
 
@@ -291,12 +290,12 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             {
                 CloseTileWindows(t);
                 t.Excluded = true;
-                _excludedDevices.Add(t.Id);
+                _excludedDevices.Add(t.Device);
             }
             else
             {
                 t.Excluded = false;
-                _excludedDevices.Remove(t.Id);
+                _excludedDevices.Remove(t.Device);
             }
         }
         Notify();
@@ -437,7 +436,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         _openedUrls.Add(link.Url);
         Notify();
 
-        string device = tile.Id;
+        string device = tile.Device;
         Rectangle windowArea = AreaOf(tile, seg);
         IntPtr windowParent = surface.Handle;
         Task<(LaunchedWindow? Win, string? Error)> attaching =
@@ -629,7 +628,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         if (seg.Launched is not null)
         {
             LaunchedWindow w = seg.Launched;
-            if (w.Attached) TrackWindowTask(tile.Id, WindowManager.ReleaseAsync(w));
+            if (w.Attached) TrackWindowTask(tile.Device, WindowManager.ReleaseAsync(w));
             else if (w.Native) NativeImage.Dispose(w);
             else Task.Run(() => WindowManager.Close(w));
             seg.Launched = null;
@@ -660,10 +659,10 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     private DisplaySurface EnsureSurface(PantallaMonitor tile)
     {
-        if (!_surfaces.TryGetValue(tile.Id, out DisplaySurface? surface) || surface.IsDisposed)
+        if (!_surfaces.TryGetValue(tile.Device, out DisplaySurface? surface) || surface.IsDisposed)
         {
             surface = new DisplaySurface(tile.Monitor, tile.Number, _icon);
-            _surfaces[tile.Id] = surface;
+            _surfaces[tile.Device] = surface;
             surface.Show();
         }
         surface.Place(tile.Monitor);
@@ -681,8 +680,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     private void CloseSurfaceIfEmpty(PantallaMonitor tile)
     {
         if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null)) return;
-        if (WindowTasksPending(tile.Id)) return;
-        if (!_surfaces.Remove(tile.Id, out DisplaySurface? surface)) return;
+        if (WindowTasksPending(tile.Device)) return;
+        if (!_surfaces.Remove(tile.Device, out DisplaySurface? surface)) return;
         if (!surface.IsDisposed) surface.Close();
     }
 
@@ -695,7 +694,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         {
             if (_disposed) return;
             if (_windowTasks.TryGetValue(device, out List<Task>? l)) l.Remove(task);
-            if (_pantallas.FirstOrDefault(t => t.Id.Equals(device, StringComparison.OrdinalIgnoreCase)) is { } tile)
+            if (_pantallas.FirstOrDefault(t => t.Device.Equals(device, StringComparison.OrdinalIgnoreCase)) is { } tile)
                 CloseSurfaceIfEmpty(tile);
         }, null), TaskScheduler.Default);
     }
@@ -759,8 +758,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     {
         if (!tile.Excluded) CloseTileWindows(tile);
         tile.Excluded = !tile.Excluded;
-        if (tile.Excluded) _excludedDevices.Add(tile.Id);
-        else _excludedDevices.Remove(tile.Id);
+        if (tile.Excluded) _excludedDevices.Add(tile.Device);
+        else _excludedDevices.Remove(tile.Device);
         if (tile.Monitor.IsPrimary)
         {
             _skipPrimaryTouched = true;
@@ -782,7 +781,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         Monitors = _pantallas.Select(t => new MonitorLayout
         {
             Number = t.Number,
-            Device = t.Id,
+            Device = t.Device,
+            Hardware = t.Id,
             Primary = t.Monitor.IsPrimary,
             Excluded = t.Excluded,
             Zones = t.Segments.Count,
@@ -810,9 +810,13 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
         var plan = new List<(PantallaMonitor Tile, MonitorLayout Layout)>();
         var used = new HashSet<PantallaMonitor>();
-        foreach (MonitorLayout ml in p.Monitors)
+        foreach (MonitorLayout ml in p.Monitors.Where(ml => !string.IsNullOrEmpty(ml.Hardware)))
             if (_pantallas.FirstOrDefault(t => !used.Contains(t) &&
-                    t.Id.Equals(ml.Device, StringComparison.OrdinalIgnoreCase)) is { } t)
+                    t.Id.Equals(ml.Hardware, StringComparison.OrdinalIgnoreCase)) is { } t)
+            { used.Add(t); plan.Add((t, ml)); }
+        foreach (MonitorLayout ml in p.Monitors.Where(ml => plan.All(x => x.Layout != ml)))
+            if (_pantallas.FirstOrDefault(t => !used.Contains(t) &&
+                    t.Device.Equals(ml.Device, StringComparison.OrdinalIgnoreCase)) is { } t)
             { used.Add(t); plan.Add((t, ml)); }
         foreach (MonitorLayout ml in p.Monitors.Where(ml => plan.All(x => x.Layout != ml)))
             if (_pantallas.FirstOrDefault(t => !used.Contains(t) && t.Number == ml.Number) is { } t)
@@ -962,71 +966,197 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         SaveLastSession();
     }
 
-    private (PantallaMonitor? Tile, Segment? Seg) Find(string monitor, int zona)
-    {
-        PantallaMonitor? t = _pantallas.FirstOrDefault(p => p.Id.Equals(monitor, StringComparison.OrdinalIgnoreCase));
-        return (t, t?.Segments.FirstOrDefault(s => s.Index == zona));
-    }
+    private PantallaMonitor? FindMonitor(string id) =>
+        _pantallas.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+        ?? _pantallas.FirstOrDefault(p => p.Device.Equals(id, StringComparison.OrdinalIgnoreCase));
 
-    Task<Resultado> IPantallas.Abrir(string monitor, int zona, LinkDef enlace)
+    private static Task<Resultado> Ok() => Task.FromResult(Resultado.Bien);
+
+    private static Task<Resultado> NoMonitor() => Task.FromResult(Resultado.Falla("monitor_no_encontrado"));
+
+    private static Task<Resultado> NoZona() => Task.FromResult(Resultado.Falla("zona_no_encontrada"));
+
+    public Task<Resultado> Abrir(string monitor, int zona, LinkDef enlace)
     {
-        (PantallaMonitor? t, Segment? s) = Find(monitor, zona);
-        if (t is null) return Task.FromResult(Resultado.Falla("monitor_no_encontrado"));
-        if (s is null) return Task.FromResult(Resultado.Falla("zona_no_encontrada"));
-        Task<Resultado> open = OpenAsync(t, s, enlace);
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        Task<Resultado> open = OpenAsync(t, seg, enlace);
         return Task.FromResult(open.IsCompleted ? open.Result : Resultado.Bien);
     }
 
-    Task<Resultado> IPantallas.Cerrar(string monitor, int zona)
+    public Task<Resultado> Cerrar(string monitor, int zona)
     {
-        (PantallaMonitor? t, Segment? s) = Find(monitor, zona);
-        if (t is null) return Task.FromResult(Resultado.Falla("monitor_no_encontrado"));
-        if (s is null) return Task.FromResult(Resultado.Falla("zona_no_encontrada"));
-        CloseZone(t, s);
-        return Task.FromResult(Resultado.Bien);
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        CloseZone(t, seg);
+        return Ok();
     }
 
-    Task<Resultado> IPantallas.CambiarGrilla(string monitor, GridLayout grilla)
+    public Task<Resultado> CambiarGrilla(string monitor, GridLayout grilla)
     {
-        (PantallaMonitor? t, _) = Find(monitor, 0);
-        if (t is null) return Task.FromResult(Resultado.Falla("monitor_no_encontrado"));
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (grilla.ActiveCount == 0) return Task.FromResult(Resultado.Falla("grilla_no_valida"));
         ChangeLayout(t, grilla);
-        return Task.FromResult(Resultado.Bien);
+        return Ok();
     }
 
-    Task<Resultado> IPantallas.AplicarPerfil(LayoutProfile perfil)
+    public Task<Resultado> DividirTodos(int columnas, int filas)
+    {
+        SetGridAll(columnas, filas);
+        return Ok();
+    }
+
+    public Task<Resultado> AlternarOmitir(string monitor)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        ToggleExcluded(t);
+        return Ok();
+    }
+
+    public Task<Resultado> OmitirPrincipal(bool omitir)
+    {
+        SetSkipPrimary(omitir);
+        return Ok();
+    }
+
+    public Task<Resultado> CerrarMonitor(string monitor)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        CloseMonitor(t);
+        return Ok();
+    }
+
+    public Task<Resultado> IntercambiarNumeros(string a, string b)
+    {
+        if (FindMonitor(a) is not { } ta || FindMonitor(b) is not { } tb) return NoMonitor();
+        if (ta != tb) SwapNumbers(ta, tb);
+        return Ok();
+    }
+
+    public Task<Resultado> NumeracionOriginal()
+    {
+        ResetNumbering();
+        return Ok();
+    }
+
+    public Task<Resultado> Combinar(List<List<string>> grupos)
+    {
+        List<MonitorInfo> physical = MonitorEnumerator.GetOrdered();
+        string? Device(string id) =>
+            physical.FirstOrDefault(m => m.Id.Equals(id, StringComparison.OrdinalIgnoreCase))?.DeviceName
+            ?? physical.FirstOrDefault(m => m.DeviceName.Equals(id, StringComparison.OrdinalIgnoreCase))?.DeviceName;
+        var groups = new List<List<string>>();
+        foreach (List<string> g in grupos)
+        {
+            var devices = g.Select(Device).ToList();
+            if (devices.Count < 2 || devices.Any(d => d is null)) return Task.FromResult(Resultado.Falla("monitor_no_encontrado"));
+            groups.Add(devices!);
+        }
+        SetGroups(groups);
+        return Ok();
+    }
+
+    public Task<Resultado> Separar(string monitor)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        SeparateMonitors(t);
+        return Ok();
+    }
+
+    public Task<Resultado> Ampliar(string monitor, int zona)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        Maximize(t, seg);
+        return Ok();
+    }
+
+    public Task<Resultado> Restaurar(string? monitor)
+    {
+        if (monitor is null) RestoreAllGrids();
+        else if (FindMonitor(monitor) is { } t) RestoreGrid(t);
+        else return NoMonitor();
+        return Ok();
+    }
+
+    public Task<Resultado> AmpliarSiguiente(string monitor, int paso)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        StepMaximize(t, Math.Sign(paso) == 0 ? 1 : Math.Sign(paso));
+        return Ok();
+    }
+
+    public Task<Resultado> AplicarPerfil(LayoutProfile perfil)
     {
         ApplyProfile(perfil);
-        return Task.FromResult(Resultado.Bien);
+        return Ok();
     }
 
-    Task<Resultado> IPantallas.AbrirEnOrden() => Task.FromResult(AutoAssignInOrder());
+    public Task<Resultado> AbrirEnOrden() => Task.FromResult(AutoAssignInOrder());
 
-    Task<Resultado> IPantallas.CerrarTodo()
-    {
-        CloseAll();
-        return Task.FromResult(Resultado.Bien);
-    }
+    public Task<Resultado> CerrarTodo() =>
+        Task.FromResult(CloseAll() ? Resultado.Bien : Resultado.Falla("nada_abierto"));
 
-    Task<Resultado> IPantallas.Identificar()
+    public Task<Resultado> Identificar()
     {
         IdentifyMonitors();
-        return Task.FromResult(Resultado.Bien);
+        return Ok();
     }
 
-    Task<List<OpenWindow>> IPantallas.VentanasAbiertas() => Task.FromResult(WindowManager.ListOpenWindows());
-
-    Task<byte[]?> IPantallas.VistaPrevia(string monitor, int ancho)
+    public Task<Resultado> RecargarMonitores()
     {
-        PantallaMonitor? t = _pantallas.FirstOrDefault(p => p.Id.Equals(monitor, StringComparison.OrdinalIgnoreCase));
-        if (t is null) return Task.FromResult<byte[]?>(null);
+        ReloadMonitors();
+        return Ok();
+    }
+
+    public Task<Resultado> RecargarTodo() =>
+        Task.FromResult(ReloadAll() ? Resultado.Bien : Resultado.Falla("nada_que_recargar"));
+
+    public Task<Resultado> ElegirNavegador(string nombre)
+    {
+        if (!Browsers.Any(b => b.Name.Equals(nombre, StringComparison.OrdinalIgnoreCase)))
+            return Task.FromResult(Resultado.Falla("navegador_no_instalado"));
+        SetBrowser(nombre);
+        return Ok();
+    }
+
+    public Task<Resultado> GuardarEnlaces(List<LinkDef> enlaces)
+    {
+        if (enlaces.Count == 0) return Task.FromResult(Resultado.Falla("lista_vacia"));
+        LinkStore.Replace(enlaces);
+        Notify();
+        return Ok();
+    }
+
+    public Task<Resultado> GuardarPerfiles(List<LayoutProfile> perfiles)
+    {
+        var keep = ProfileStore.Get(ProfileStore.LastSession);
+        var list = perfiles.Where(x => !ProfileStore.IsLastSession(x.Name)).ToList();
+        if (keep is not null) list.Add(keep);
+        ProfileStore.ReplaceAll(list);
+        Notify();
+        return Ok();
+    }
+
+    public Task<List<VentanaAbierta>> VentanasAbiertas() =>
+        Task.FromResult(WindowManager.ListOpenWindows().Select(w => new VentanaAbierta(w.ProcessName, w.Title, SpecOf(w))).ToList());
+
+    public Task<List<MonitorFisico>> MonitoresFisicos() =>
+        Task.FromResult(MonitorEnumerator.GetOrdered().Select(m => new MonitorFisico(m.Id, m.X, m.Y, m.Width, m.Height, m.IsPrimary)).ToList());
+
+    public Task<byte[]?> VistaPrevia(string monitor, int ancho)
+    {
+        if (FindMonitor(monitor) is not { } t) return Task.FromResult<byte[]?>(null);
         MonitorInfo m = t.Monitor;
         return Task.Run<byte[]?>(() =>
         {
             using Bitmap? bmp = CaptureMonitor(m, ancho);
             if (bmp is null) return null;
             using var ms = new MemoryStream();
-            bmp.Save(ms, ImageFormat.Jpeg);
+            var codec = ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid);
+            using var prms = new EncoderParameters(1);
+            prms.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 70L);
+            bmp.Save(ms, codec, prms);
             return ms.ToArray();
         });
     }

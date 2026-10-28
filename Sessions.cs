@@ -15,6 +15,7 @@ internal sealed class MonitorLayout
 {
     public int Number { get; set; }
     public string Device { get; set; } = "";
+    public string? Hardware { get; set; }
     public bool Primary { get; set; }
     public bool Excluded { get; set; }
     public int Zones { get; set; } = 1;
@@ -48,6 +49,16 @@ internal static class ProfileStore
     };
 
     public static List<LayoutProfile> Items { get; private set; } = new();
+
+    public static Action<List<LayoutProfile>>? Remote { get; set; }
+
+    public static void SetFromRemote(IEnumerable<LayoutProfile> items) => Items = items.ToList();
+
+    public static void ReplaceAll(IEnumerable<LayoutProfile> items)
+    {
+        Items = items.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+        Save();
+    }
 
     public static IEnumerable<LayoutProfile> Named =>
         Items.Where(p => !IsLastSession(p.Name)).OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase);
@@ -92,6 +103,11 @@ internal static class ProfileStore
 
     private static void Save()
     {
+        if (Remote is not null)
+        {
+            Remote(Items.ToList());
+            return;
+        }
         try
         {
             string tmp = FilePath + ".tmp";

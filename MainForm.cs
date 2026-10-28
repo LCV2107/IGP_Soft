@@ -2,12 +2,19 @@ using System.Threading;
 
 namespace IGP_Soft;
 
+internal enum ModoPanel { Normal, Controlado, Remoto }
+
 internal sealed class MainForm : Form
 {
-    private readonly PantallasLocales _pantallas;
+    private readonly IPantallas _p;
+    private readonly PantallasLocales? _local;
+    private readonly ModoPanel _modo;
+    private EstadoPantallas _estado = EstadoPantallas.Vacio;
+    private string _tilesKey = "";
     private readonly List<MonitorTile> _tiles = new();
     private bool _syncing;
     private bool _activatePanelOnOpen;
+    private string? _controlador;
 
     private readonly Label _info = new();
     private readonly Panel _canvas = new();
@@ -15,9 +22,9 @@ internal sealed class MainForm : Form
     private readonly ToggleSwitch _chkPreview = new("");
     private readonly ToggleSwitch _chkSkipPrimary = new("");
     private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 1500 };
-    private volatile bool _capturing;
-    private NotifyIcon _tray = null!;
-    private Icon? _trayIcon;
+    private bool _capturing;
+    private NotifyIcon? _tray;
+    private readonly Icon _trayIcon;
     private bool _reallyExit;
     private bool _trayHintShown;
     private EventWaitHandle? _showEvent;
@@ -25,6 +32,8 @@ internal sealed class MainForm : Form
     private readonly Panel _content = new();
     private readonly List<(ModernButton Nav, Page Page)> _nav = new();
     private readonly Panel _sideStatus = new();
+    private readonly Panel _lock = new();
+    private readonly Label _lockText = new();
     private readonly Chip _chipBrowser = new();
     private readonly Chip _chipMonitors = new();
     private readonly Chip _chipZones = new();
@@ -36,33 +45,48 @@ internal sealed class MainForm : Form
     private volatile bool _sampling;
     private Page _screensPage = null!;
     private LinksPage _linksPage = null!;
-    private GalleryPage _galleryPage = null!;
+    private GalleryPage? _galleryPage;
     private ProfilesPage _profilesPage = null!;
-    private ExportPage _exportPage = null!;
-    private SettingsPage _settingsPage = null!;
-    private ToolStripMenuItem _trayProfiles = null!;
+    private ExportPage? _exportPage;
+    private SettingsPage? _settingsPage;
+    private ToolStripMenuItem? _trayProfiles;
+    private ToolStripMenuItem? _trayCloseAll;
 
-    public MainForm(string startupProfile)
+    public static Icon AppIcon { get; } = BuildIcon();
+
+    private bool Remoto => _modo == ModoPanel.Remoto;
+
+    public MainForm(IPantallas pantallas, ModoPanel modo, string startupProfile)
     {
-        Text = "IGP_Soft — Pantallas de monitoreo IGP";
+        _p = pantallas;
+        _local = pantallas as PantallasLocales;
+        _modo = modo;
+        _trayIcon = AppIcon;
+        Text = Remoto ? "IGP_Soft — Control remoto" : "IGP_Soft — Pantallas de monitoreo IGP";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(980, 620);
         Size = new Size(1240, 760);
         TopMost = false;
 
-        _trayIcon = BuildIcon();
-        _pantallas = new PantallasLocales(_trayIcon);
-        _pantallas.Changed += OnStateChanged;
-        _pantallas.MonitorsChanged += RebuildTiles;
-        _pantallas.SurfaceShown += KeepPanelAboveSurfaces;
-        _pantallas.ZoneOpened += () => KeepPanelInFront(_activatePanelOnOpen);
-        _pantallas.Aviso += ShowAviso;
+        _p.Cambio += e => OnUi(() => OnEstado(e));
+        _p.Aviso += r => OnUi(() => ShowAviso(r));
+        if (_local is not null)
+        {
+            _local.SurfaceShown += KeepPanelAboveSurfaces;
+            _local.ZoneOpened += () => KeepPanelInFront(_activatePanelOnOpen);
+        }
+        if (Remoto)
+        {
+            LinkStore.Remote = list => _ = _p.GuardarEnlaces(list);
+            ProfileStore.Remote = list => _ = _p.GuardarPerfiles(list);
+        }
 
         BuildLayout();
-        BuildTray();
-        _pantallas.Start();
+        if (!Remoto) BuildTray();
+        _local?.Start();
+        OnEstado(_p.Estado);
 
-        if (_pantallas.Browser is null)
+        if (_estado.Navegador is null && !Remoto)
         {
             _info.Visible = true;
             _info.Text = "⚠  No hay un navegador compatible (Edge, Chrome, Brave, Firefox u Opera). Instala uno para mostrar pantallas.";
@@ -70,23 +94,25 @@ internal sealed class MainForm : Form
 
         _previewTimer.Tick += (_, _) =>
         {
-            if (_chkPreview.Checked) CapturePreviews();
+            if (_chkPreview.Checked) _ = CapturePreviews();
         };
         _previewTimer.Start();
-        _maintenanceTimer.Tick += (_, _) => Maintenance();
-        _maintenanceTimer.Start();
-
-        Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
-        Updater.Found += OnUpdateFound;
-        Shown += async (_, _) =>
+        if (!Remoto)
         {
-            await Task.Delay(15000);
-            await CheckForUpdatesQuietly();
-        };
+            _maintenanceTimer.Tick += (_, _) => Maintenance();
+            _maintenanceTimer.Start();
+            Shown += (_, _) => BeginInvoke(() => RunStartupProfile(startupProfile));
+            Updater.Found += OnUpdateFound;
+            Shown += async (_, _) =>
+            {
+                await Task.Delay(15000);
+                await CheckForUpdatesQuietly();
+            };
+        }
 
         FormClosing += (_, e) =>
         {
-            if (_reallyExit) return;
+            if (_reallyExit || Remoto) return;
             if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing) return;
             e.Cancel = true;
             HideToTray();
@@ -97,16 +123,30 @@ internal sealed class MainForm : Form
             _previewTimer.Stop();
             _maintenanceTimer.Stop();
             Updater.Found -= OnUpdateFound;
-            Hotkeys.Changed -= ReRegisterHotkeys;
-            Hotkeys.Unregister(Handle);
+            if (!Remoto)
+            {
+                Hotkeys.Changed -= ReRegisterHotkeys;
+                Hotkeys.Unregister(Handle);
+            }
             _showReg?.Unregister(null);
             _showEvent?.Dispose();
-            _pantallas.Dispose();
+            _local?.Dispose();
+            (_p as IDisposable)?.Dispose();
             ClearPreviews();
-            _tray.Visible = false;
-            _tray.Dispose();
-            _trayIcon?.Dispose();
+            if (_tray is not null)
+            {
+                _tray.Visible = false;
+                _tray.Dispose();
+            }
         };
+    }
+
+    private void OnUi(Action a)
+    {
+        if (IsDisposed) return;
+        if (!IsHandleCreated || !InvokeRequired) { a(); return; }
+        try { BeginInvoke(a); }
+        catch { }
     }
 
     private void BuildLayout()
@@ -124,13 +164,10 @@ internal sealed class MainForm : Form
         _cboBrowser.FlatStyle = FlatStyle.Flat;
         _cboBrowser.Font = Theme.Body;
         _cboBrowser.Width = 220;
-        foreach (Browser b in _pantallas.Browsers) _cboBrowser.Items.Add(b.Name);
-        if (_pantallas.Browser is not null) _cboBrowser.SelectedItem = _pantallas.Browser.Name;
-        _cboBrowser.Enabled = _pantallas.Browsers.Count > 0;
         _cboBrowser.SelectedIndexChanged += (_, _) =>
         {
             if (_syncing) return;
-            if (_cboBrowser.SelectedItem is string name) _pantallas.SetBrowser(name);
+            if (_cboBrowser.SelectedItem is string name) _ = _p.ElegirNavegador(name);
         };
 
         _chkPreview.Text = "Vista previa en vivo de cada monitor en el panel";
@@ -141,7 +178,7 @@ internal sealed class MainForm : Form
         _chkSkipPrimary.CheckedChanged += (_, _) =>
         {
             if (_syncing) return;
-            _pantallas.SetSkipPrimary(_chkSkipPrimary.Checked);
+            _ = _p.OmitirPrincipal(_chkSkipPrimary.Checked);
         };
 
         _screensPage = new Page("Pantallas", "Clic en una zona para elegir qué mostrar  ·  ⊞ para dividir  ·  arrastra un monitor sobre otro para cambiar su número.");
@@ -150,13 +187,14 @@ internal sealed class MainForm : Form
         FlowLayoutPanel actions = Page.ToolBar(
             Page.ToolButton("▶  Abrir en orden", AutoAssignInOrder, primary: true),
             gridAll,
-            Page.ToolButton("◎  Identificar", () => _pantallas.IdentifyMonitors()),
+            Page.ToolButton("◎  Identificar", () => _ = _p.Identificar()),
             Page.ToolButton("⧉  Combinar monitores", ShowCombine),
-            Page.ToolButton("⟳  Actualizar", () => _pantallas.ReloadMonitors()),
+            Page.ToolButton("⟳  Actualizar", () => _ = _p.RecargarMonitores()),
             Page.ToolButton("✕  Cerrar todas", CloseAll));
 
         var chips = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, WrapContents = false, BackColor = Theme.Background };
-        foreach (Chip c in new[] { _chipBrowser, _chipMonitors, _chipZones, _chipOpen, _chipMemory, _chipLinks }) chips.Controls.Add(c);
+        foreach (Chip c in new[] { _chipBrowser, _chipMonitors, _chipZones, _chipOpen, _chipMemory, _chipLinks })
+            if (!(Remoto && c == _chipMemory)) chips.Controls.Add(c);
 
         _canvas.Dock = DockStyle.Fill;
         _canvas.BackColor = Theme.Background;
@@ -172,17 +210,29 @@ internal sealed class MainForm : Form
         _linksPage = new LinksPage();
         _linksPage.Changed += () =>
         {
+            _local?.Refresh();
             foreach (MonitorTile t in _tiles) t.Invalidate();
             UpdateInfo();
         };
-        _galleryPage = new GalleryPage(GalleryTargets);
-        _profilesPage = new ProfilesPage(_pantallas.Snapshot, p =>
+        _profilesPage = new ProfilesPage(name => _estado.ComoPerfil(name), p =>
         {
             ApplyProfile(p);
             ShowPage(_screensPage);
-        });
-        _exportPage = new ExportPage(() => { _pantallas.CloseAllWindows(); return true; }, AfterRestore);
-        _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary, () => ReloadAll(manual: true), RestartForUpdate);
+        })
+        { StartupLocal = !Remoto };
+
+        var pages = new List<(string, string, Page)> { ("▦", "Pantallas", _screensPage), ("☰", "Enlaces", _linksPage) };
+        if (!Remoto)
+        {
+            _galleryPage = new GalleryPage(GalleryTargets);
+            _exportPage = new ExportPage(() => { _local?.CloseAllWindows(); return true; }, AfterRestore);
+            _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary, () => ReloadAll(manual: true), RestartForUpdate);
+            pages.Add(("▤", "Galería", _galleryPage));
+            pages.Add(("★", "Perfiles", _profilesPage));
+            pages.Add(("⇪", "Exportar y copias", _exportPage));
+            pages.Add(("⚙", "Ajustes", _settingsPage));
+        }
+        else pages.Add(("★", "Perfiles", _profilesPage));
 
         var side = new Panel { Dock = DockStyle.Left, Width = 236, BackColor = Theme.Sidebar };
         var brand = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Sidebar };
@@ -197,8 +247,10 @@ internal sealed class MainForm : Form
             TextRenderer.DrawText(g, "IGP", Theme.SmallBold, logo, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             using var title = Theme.Ui(13f, FontStyle.Bold);
             TextRenderer.DrawText(g, "IGP_Soft", title, new Point(74, 26), Color.White);
-            TextRenderer.DrawText(g, "Pantallas de monitoreo", Theme.Small, new Point(75, 50), Theme.SidebarMuted);
+            string sub = Remoto ? "Controlando " + (_estado.Equipo.Length > 0 ? _estado.Equipo : "otro equipo") : "Pantallas de monitoreo";
+            TextRenderer.DrawText(g, sub, Theme.Small, new Point(75, 50), Remoto ? Color.FromArgb(250, 204, 21) : Theme.SidebarMuted);
         };
+        _brand = brand;
 
         var navList = new FlowLayoutPanel
         {
@@ -210,11 +262,7 @@ internal sealed class MainForm : Form
             Text = "MENÚ", Font = Theme.SmallBold, ForeColor = Theme.SidebarMuted, AutoSize = false,
             Size = new Size(200, 24), Margin = new Padding(8, 0, 0, 4), TextAlign = ContentAlignment.MiddleLeft,
         });
-        foreach ((string glyph, string text, Page page) in new (string, string, Page)[]
-                 {
-                     ("▦", "Pantallas", _screensPage), ("☰", "Enlaces", _linksPage), ("▤", "Galería", _galleryPage),
-                     ("★", "Perfiles", _profilesPage), ("⇪", "Exportar y copias", _exportPage), ("⚙", "Ajustes", _settingsPage),
-                 })
+        foreach ((string glyph, string text, Page page) in pages)
         {
             var b = new ModernButton(text, ButtonKind.Nav, glyph)
             {
@@ -237,12 +285,24 @@ internal sealed class MainForm : Form
         side.Controls.Add(_sideStatus);
         side.Controls.Add(brand);
 
+        _lock.Dock = DockStyle.Fill;
+        _lock.BackColor = Theme.Background;
+        _lock.Visible = false;
+        _lockText.Dock = DockStyle.Fill;
+        _lockText.TextAlign = ContentAlignment.MiddleCenter;
+        _lockText.Font = Theme.Section;
+        _lockText.ForeColor = Theme.Text;
+        _lock.Controls.Add(_lockText);
+
         _content.Dock = DockStyle.Fill;
         _content.BackColor = Theme.Background;
+        Controls.Add(_lock);
         Controls.Add(_content);
         Controls.Add(side);
         ShowPage(_screensPage);
     }
+
+    private Panel? _brand;
 
     private void PaintSideStatus(object? sender, PaintEventArgs e)
     {
@@ -250,15 +310,15 @@ internal sealed class MainForm : Form
         Theme.Smooth(g);
         var card = new RectangleF(14, 8, _sideStatus.Width - 28, _sideStatus.Height - 20);
         Theme.FillRound(g, Theme.SidebarHover, card, 10);
-        Browser? browser = _pantallas.Browser;
-        int open = _pantallas.OpenCount;
+        string? browser = _estado.Navegador;
+        int open = _estado.EnVivo;
         Color dot = browser is null ? Theme.Danger : open > 0 ? Color.FromArgb(74, 222, 128) : Theme.SidebarMuted;
         using (var b = new SolidBrush(dot)) g.FillEllipse(b, card.X + 14, card.Y + 17, 9, 9);
         string state = browser is null ? "Sin navegador" : open > 0 ? $"{open} pantalla(s) en vivo" : "Sin pantallas abiertas";
         TextRenderer.DrawText(g, state, Theme.SmallBold, new Point((int)card.X + 30, (int)card.Y + 12), Color.White);
-        string second = _browserMemory > 0
-            ? $"{ResourceMonitor.Format(_browserMemory)} · {browser?.Name ?? "—"}"
-            : $"{_pantallas.Monitores.Count} monitor(es) · {browser?.Name ?? "—"}";
+        string second = _browserMemory > 0 && !Remoto
+            ? $"{ResourceMonitor.Format(_browserMemory)} · {browser ?? "—"}"
+            : $"{_estado.Monitores.Count} monitor(es) · {browser ?? "—"}";
         TextRenderer.DrawText(g, second, Theme.Small,
             new Point((int)card.X + 30, (int)card.Y + 32), Theme.SidebarMuted);
     }
@@ -281,41 +341,67 @@ internal sealed class MainForm : Form
     private IReadOnlyList<GalleryTarget> GalleryTargets()
     {
         var targets = new List<GalleryTarget>();
-        foreach (PantallaMonitor t in _pantallas.Monitores.Where(t => !t.Excluded))
-            foreach (Segment s in t.Usable)
+        foreach (EstadoMonitor m in _estado.Monitores.Where(m => !m.Omitido))
+            foreach (EstadoZona z in m.Usables)
             {
-                PantallaMonitor tile = t;
-                Segment seg = s;
-                string label = t.Usable.Count() > 1 ? $"Monitor {t.Number} · zona {t.DisplayNumber(s)}" : $"Monitor {t.Number}";
-                targets.Add(new GalleryTarget(label, s.Link?.Titulo, link => Open(tile, seg, link)));
+                string id = m.Id;
+                int zona = z.Zona;
+                string label = m.Usables.Count() > 1 ? $"Monitor {m.Numero} · zona {m.NumeroVisible(z)}" : $"Monitor {m.Numero}";
+                targets.Add(new GalleryTarget(label, z.Titulo, link => Open(id, zona, link)));
             }
         return targets;
     }
 
     private void AfterRestore()
     {
-        _pantallas.ReloadSettings();
+        _local?.ReloadSettings();
         foreach (MonitorTile t in _tiles) t.Invalidate();
         UpdateInfo();
     }
 
-    private void OnStateChanged()
+    private void OnEstado(EstadoPantallas e)
     {
+        if (e.Seq < _estado.Seq && e.Equipo == _estado.Equipo) return;
+        _estado = e;
+        if (Remoto)
+        {
+            LinkStore.SetFromRemote(e.Enlaces);
+            ProfileStore.SetFromRemote(e.Perfiles);
+            Text = $"IGP_Soft — Controlando {e.Equipo}";
+            _brand?.Invalidate();
+        }
+
         _syncing = true;
         try
         {
-            if (_pantallas.Browser is { } b && !string.Equals(_cboBrowser.SelectedItem as string, b.Name, StringComparison.Ordinal))
-                _cboBrowser.SelectedItem = b.Name;
-            if (_chkSkipPrimary.Checked != _pantallas.SkipPrimary) _chkSkipPrimary.Checked = _pantallas.SkipPrimary;
+            var names = e.Navegadores.ToList();
+            if (!_cboBrowser.Items.Cast<string>().SequenceEqual(names))
+            {
+                _cboBrowser.Items.Clear();
+                foreach (string n in names) _cboBrowser.Items.Add(n);
+            }
+            _cboBrowser.Enabled = names.Count > 0;
+            if (e.Navegador is not null && !string.Equals(_cboBrowser.SelectedItem as string, e.Navegador, StringComparison.Ordinal))
+                _cboBrowser.SelectedItem = e.Navegador;
+            if (_chkSkipPrimary.Checked != e.OmitirPrincipal) _chkSkipPrimary.Checked = e.OmitirPrincipal;
         }
         finally { _syncing = false; }
-        _tiles.Sort((a, b) => a.Number.CompareTo(b.Number));
-        foreach (MonitorTile t in _tiles) t.Invalidate();
+
+        string key = string.Join(";", e.Monitores.Select(m => $"{m.Id}|{m.X}|{m.Y}|{m.Ancho}|{m.Alto}"));
+        if (key != _tilesKey) RebuildTiles(key);
+        else
+        {
+            foreach (MonitorTile t in _tiles)
+                if (e.Monitor(t.Id) is { } m) t.Data = m;
+            _tiles.Sort((a, b) => a.Data.Numero.CompareTo(b.Data.Numero));
+            foreach (MonitorTile t in _tiles) t.Invalidate();
+        }
         UpdateInfo();
     }
 
     private void ShowAviso(Resultado r)
     {
+        if (r.Mensaje is null) return;
         MessageBoxIcon icon = r.Nivel switch
         {
             Nivel.Error => MessageBoxIcon.Error,
@@ -323,6 +409,33 @@ internal sealed class MainForm : Form
             _ => MessageBoxIcon.Information,
         };
         MessageBox.Show(this, r.Mensaje, r.Titulo ?? "IGP_Soft", MessageBoxButtons.OK, icon);
+    }
+
+    public void ShowInfo(string? text)
+    {
+        _info.Visible = text is not null;
+        _info.Text = text ?? "";
+    }
+
+    public void SetControlador(string? equipo)
+    {
+        _controlador = equipo;
+        _lock.Visible = equipo is not null;
+        if (equipo is not null)
+        {
+            _lockText.Text = $"🔒  Controlado desde {equipo}\n\nMientras dure el control remoto, este panel queda bloqueado.\nSe libera solo al terminar la conexión.";
+            _lock.BringToFront();
+        }
+        if (_trayProfiles is not null) _trayProfiles.Enabled = equipo is null;
+        if (_trayCloseAll is not null) _trayCloseAll.Enabled = equipo is null;
+    }
+
+    public void CloseFromRemote(string mensaje)
+    {
+        if (IsDisposed) return;
+        MessageBox.Show(this, mensaje, "IGP_Soft — Control remoto", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        _reallyExit = true;
+        Close();
     }
 
     private void KeepPanelAboveSurfaces()
@@ -334,22 +447,24 @@ internal sealed class MainForm : Form
 
     private void RememberPanelFocus() => _activatePanelOnOpen = ActiveForm == this || (Visible && ContainsFocus);
 
-    private void Open(PantallaMonitor tile, Segment seg, LinkDef link)
+    private void Open(string monitor, int zona, LinkDef link)
     {
         RememberPanelFocus();
-        _ = _pantallas.OpenAsync(tile, seg, link);
+        _ = _p.Abrir(monitor, zona, link);
     }
 
     private void AutoAssignInOrder()
     {
+        if (_controlador is not null) return;
         RememberPanelFocus();
-        _pantallas.AutoAssignInOrder();
+        _ = _p.AbrirEnOrden();
     }
 
     private void ApplyProfile(LayoutProfile p)
     {
+        if (_controlador is not null) return;
         RememberPanelFocus();
-        _pantallas.ApplyProfile(p);
+        _ = _p.AplicarPerfil(p);
     }
 
     private void BuildTray()
@@ -362,7 +477,8 @@ internal sealed class MainForm : Form
         _trayProfiles = new ToolStripMenuItem("Abrir perfil");
         menu.Items.Add(_trayProfiles);
         menu.Opening += (_, _) => FillProfileMenu(_trayProfiles);
-        menu.Items.Add(new ToolStripMenuItem("Cerrar todas las ventanas", null, (_, _) => CloseAll()));
+        _trayCloseAll = new ToolStripMenuItem("Cerrar todas las ventanas", null, (_, _) => CloseAll());
+        menu.Items.Add(_trayCloseAll);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Salir", null, (_, _) => ExitApp()));
 
@@ -404,8 +520,9 @@ internal sealed class MainForm : Form
         return ico;
     }
 
-    private void HideToTray()
+    public void HideToTray()
     {
+        if (_tray is null) return;
         Hide();
         ShowInTaskbar = false;
         if (!_trayHintShown)
@@ -428,28 +545,29 @@ internal sealed class MainForm : Form
     private void ExitApp()
     {
         if (!Visible) ShowFromTray();
-        if (_pantallas.AnyBusy)
+        if (_estado.HayAbierto && _local is not null)
         {
             DialogResult r = MessageBox.Show(this,
                 "Al salir se cerrarán las pantallas de monitoreo y su contenido " +
                 "(las ventanas adjuntas vuelven al escritorio, no se cierran). ¿Desea continuar?",
                 "Salir de IGP_Soft", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
-            _pantallas.CloseEverything();
+            _local.CloseEverything();
         }
         _reallyExit = true;
         Close();
     }
 
-    private void RebuildTiles()
+    private void RebuildTiles(string key)
     {
+        _tilesKey = key;
         foreach (MonitorTile t in _tiles) { _canvas.Controls.Remove(t); t.Dispose(); }
         _tiles.Clear();
 
-        foreach (PantallaMonitor m in _pantallas.Monitores)
+        foreach (EstadoMonitor m in _estado.Monitores.OrderBy(m => m.Numero))
         {
             var tile = new MonitorTile(m);
-            tile.SegmentActivated += ShowSegmentMenu;
+            tile.ZoneActivated += ShowSegmentMenu;
             tile.MonitorMenuRequested += ShowMonitorMenu;
             tile.GridRequested += ShowGridPicker;
             tile.DragMoved += OnTileDragMoved;
@@ -459,7 +577,6 @@ internal sealed class MainForm : Form
         }
 
         RelayoutTiles();
-        UpdateInfo();
     }
 
     private MonitorTile? TileAtScreen(Point screen, MonitorTile? except)
@@ -485,47 +602,54 @@ internal sealed class MainForm : Form
         MonitorTile? target = TileAtScreen(screen, source);
         foreach (MonitorTile t in _tiles.Where(t => t.DropTarget)) { t.DropTarget = false; t.Invalidate(); }
         if (target is null) return;
-        _pantallas.SwapNumbers(source.Model, target.Model);
+        _ = _p.IntercambiarNumeros(source.Id, target.Id);
     }
 
-    private void ShowCombine()
+    private static List<List<string>> GroupsOf(EstadoPantallas e) =>
+        e.Monitores.Where(m => m.Combinado && m.Id.StartsWith("grupo:", StringComparison.Ordinal))
+                   .Select(m => m.Id["grupo:".Length..].Split('+', StringSplitOptions.RemoveEmptyEntries).ToList())
+                   .ToList();
+
+    private async void ShowCombine()
     {
-        using var f = new CombineForm(_pantallas.PhysicalMonitors());
+        List<MonitorFisico> physical = await _p.MonitoresFisicos();
+        if (physical.Count == 0 || IsDisposed) return;
+        using var f = new CombineForm(physical.Select(m => m.ComoMonitor()).ToList(), GroupsOf(_estado));
         if (f.ShowDialog(this) != DialogResult.OK) return;
-        _pantallas.SetGroups(f.Result);
+        _ = _p.Combinar(f.Result);
     }
 
-    private void SeparateMonitors(PantallaMonitor tile)
+    private void SeparateMonitors(EstadoMonitor m)
     {
-        if (!tile.Monitor.IsCombined) return;
-        if (tile.Segments.Any(s => s.Busy) &&
+        if (!m.Combinado) return;
+        if (m.Zonas.Any(z => z.Ocupada) &&
             MessageBox.Show(this, "Se cerrará lo que está abierto en esta pantalla combinada. ¿Separar los monitores?", "Separar monitores",
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
-        _pantallas.SeparateMonitors(tile);
+        _ = _p.Separar(m.Id);
     }
 
-    private void AddMonitorItems(ContextMenuStrip menu, PantallaMonitor tile)
+    private void AddMonitorItems(ContextMenuStrip menu, EstadoMonitor m)
     {
-        var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => _pantallas.CloseMonitor(tile))
+        var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => _ = _p.CerrarMonitor(m.Id))
         {
-            Enabled = tile.Segments.Any(s => s.Busy),
+            Enabled = m.Zonas.Any(z => z.Ocupada),
         };
         Keys k = Hotkeys.Get(Hotkeys.Actions.First(a => a.Key == "cerrarmonitor"));
-        if (k != Keys.None) close.ShortcutKeyDisplayString = Hotkeys.Format(k);
+        if (k != Keys.None && !Remoto) close.ShortcutKeyDisplayString = Hotkeys.Format(k);
         menu.Items.Add(close);
-        if (tile.Monitor.IsCombined)
-            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(tile)));
-        if (_pantallas.HasCustomNumbering())
-            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _pantallas.ResetNumbering()));
+        if (m.Combinado)
+            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(m)));
+        if (_estado.NumeracionPropia)
+            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _ = _p.NumeracionOriginal()));
     }
 
     private void UpdateInfo()
     {
-        _chipBrowser.Set("Navegador", _pantallas.Browser?.Name ?? "ninguno");
-        _chipMonitors.Set("Monitores", _pantallas.Monitores.Count.ToString());
-        _chipZones.Set("Zonas", _pantallas.ZoneCount.ToString());
-        int abiertas = _pantallas.OpenCount;
+        _chipBrowser.Set("Navegador", _estado.Navegador ?? "ninguno");
+        _chipMonitors.Set("Monitores", _estado.Monitores.Count.ToString());
+        _chipZones.Set("Zonas", _estado.ZonasUsables.ToString());
+        int abiertas = _estado.EnVivo;
         _chipOpen.Set("En vivo", abiertas.ToString());
         _chipOpen.Fill = abiertas > 0 ? Theme.SuccessSoft : Theme.Surface;
         _chipLinks.Set("Enlaces", LinkStore.Links.Count.ToString());
@@ -537,11 +661,10 @@ internal sealed class MainForm : Form
     {
         if (_tiles.Count == 0) return;
 
-        List<MonitorInfo> monitors = _pantallas.Monitores.Select(p => p.Monitor).ToList();
-        int minX = monitors.Min(m => m.X);
-        int minY = monitors.Min(m => m.Y);
-        int maxX = monitors.Max(m => m.X + m.Width);
-        int maxY = monitors.Max(m => m.Y + m.Height);
+        int minX = _tiles.Min(t => t.Data.X);
+        int minY = _tiles.Min(t => t.Data.Y);
+        int maxX = _tiles.Max(t => t.Data.X + t.Data.Ancho);
+        int maxY = _tiles.Max(t => t.Data.Y + t.Data.Alto);
 
         var area = new Rectangle(
             _canvas.Padding.Left, _canvas.Padding.Top,
@@ -560,12 +683,12 @@ internal sealed class MainForm : Form
         const int gap = 8;
         foreach (MonitorTile t in _tiles)
         {
-            MonitorInfo m = t.Monitor;
+            EstadoMonitor m = t.Data;
             t.Bounds = new Rectangle(
                 offX + (int)((m.X - minX) * scale) + gap,
                 offY + (int)((m.Y - minY) * scale) + gap,
-                Math.Max(120, (int)(m.Width * scale) - gap * 2),
-                Math.Max(80, (int)(m.Height * scale) - gap * 2));
+                Math.Max(120, (int)(m.Ancho * scale) - gap * 2),
+                Math.Max(80, (int)(m.Alto * scale) - gap * 2));
         }
     }
 
@@ -627,6 +750,7 @@ internal sealed class MainForm : Form
 
     private void ShowUpdates()
     {
+        if (_settingsPage is null) return;
         if (!Visible) ShowFromTray();
         ShowPage(_settingsPage);
         if (_settingsPage.UpdatesCard is { } card && card.Parent is ScrollableControl sc) sc.ScrollControlIntoView(card);
@@ -642,7 +766,7 @@ internal sealed class MainForm : Form
 
     private void OnUpdateFound(UpdateInfo u)
     {
-        if (IsDisposed) return;
+        if (IsDisposed || _tray is null) return;
         bool dismissed = Updater.Dismissed == u.Version.ToString();
         _updateText.Text = $"⬆   Hay una versión nueva de IGP_Soft: {u.Version}" + (u.Version.IsPrerelease ? " (experimental)" : "") +
                            $"  ·  tienes la {Updater.Current}";
@@ -661,7 +785,7 @@ internal sealed class MainForm : Form
 
     private void RestartForUpdate()
     {
-        _pantallas.CloseEverything();
+        _local?.CloseEverything();
         Updater.Restart($"--perfil=\"{ProfileStore.LastSession}\"");
         _reallyExit = true;
         Close();
@@ -676,9 +800,10 @@ internal sealed class MainForm : Form
         _chipMemory.Invalidate();
     }
 
-    private void ReloadAll(bool manual)
+    private async void ReloadAll(bool manual)
     {
-        if (!_pantallas.ReloadAll() && manual)
+        Resultado r = await _p.RecargarTodo();
+        if (!r.Ok && manual && !IsDisposed)
             MessageBox.Show(this, "No hay páginas abiertas para recargar.", "Recargar", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
@@ -693,44 +818,32 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void CapturePreviews()
+    private async Task CapturePreviews()
     {
-        if (_capturing || !Visible || WindowState == FormWindowState.Minimized || _tiles.Count == 0) return;
+        if (_capturing || !Visible || WindowState == FormWindowState.Minimized || _tiles.Count == 0 || _lock.Visible) return;
         _capturing = true;
-
-        var jobs = _tiles.Where(t => !t.Excluded && t.Width > 8 && t.Height > 8)
-                         .Select(t => (Tile: t, t.Monitor, t.Width)).ToList();
-
-        Task.Run(() =>
+        try
         {
-            var done = new List<(MonitorTile Tile, Bitmap Bmp)>();
-            foreach (var j in jobs)
-                if (PantallasLocales.CaptureMonitor(j.Monitor, Math.Clamp(j.Width * 2, 160, 720)) is { } thumb)
-                    done.Add((j.Tile, thumb));
-
-            void Apply()
+            foreach (MonitorTile tile in _tiles.Where(t => !t.Data.Omitido && t.Width > 8 && t.Height > 8).ToList())
             {
-                foreach (var (tile, bmp) in done)
+                int width = Remoto ? Math.Clamp(tile.Width, 160, 320) : Math.Clamp(tile.Width * 2, 160, 720);
+                byte[]? jpeg = await _p.VistaPrevia(tile.Id, width);
+                if (jpeg is null || IsDisposed || !_tiles.Contains(tile) || tile.Data.Omitido || !_chkPreview.Checked) continue;
+                Bitmap bmp;
+                try
                 {
-                    if (!IsDisposed && _tiles.Contains(tile) && !tile.Excluded)
-                    {
-                        Bitmap? old = tile.Preview;
-                        tile.Preview = bmp;
-                        old?.Dispose();
-                        tile.Invalidate();
-                    }
-                    else bmp.Dispose();
+                    using var ms = new MemoryStream(jpeg);
+                    using var img = Image.FromStream(ms);
+                    bmp = new Bitmap(img);
                 }
-                _capturing = false;
+                catch { continue; }
+                Bitmap? old = tile.Preview;
+                tile.Preview = bmp;
+                old?.Dispose();
+                tile.Invalidate();
             }
-
-            try
-            {
-                if (IsDisposed) { foreach (var d in done) d.Bmp.Dispose(); _capturing = false; }
-                else BeginInvoke(Apply);
-            }
-            catch { foreach (var d in done) d.Bmp.Dispose(); _capturing = false; }
-        });
+        }
+        finally { _capturing = false; }
     }
 
     protected override void WndProc(ref Message m)
@@ -743,39 +856,49 @@ internal sealed class MainForm : Form
             return;
         }
         base.WndProc(ref m);
-        if (m.Msg == WM_DISPLAYCHANGE)
-            BeginInvoke(() => _pantallas.ReloadMonitors());
+        if (m.Msg == WM_DISPLAYCHANGE && _local is not null)
+            BeginInvoke(() => _ = _p.RecargarMonitores());
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        if (Remoto) return;
         Hotkeys.Register(Handle);
         Hotkeys.Changed += ReRegisterHotkeys;
     }
 
     private void ReRegisterHotkeys()
     {
-        if (IsHandleCreated && !IsDisposed) Hotkeys.Register(Handle);
+        if (IsHandleCreated && !IsDisposed && !Remoto) Hotkeys.Register(Handle);
+    }
+
+    private EstadoMonitor? MonitorUnderCursor()
+    {
+        Point p = Cursor.Position;
+        return _estado.Monitores.FirstOrDefault(m => !m.Omitido && new Rectangle(m.X, m.Y, m.Ancho, m.Alto).Contains(p));
     }
 
     private void HandleHotkey(int id)
     {
-        PantallaMonitor? under = _pantallas.MonitorAt(Cursor.Position);
-        switch (Hotkeys.Actions.FirstOrDefault(a => a.Id == id)?.Key)
+        if (Remoto) return;
+        string? key = Hotkeys.Actions.FirstOrDefault(a => a.Id == id)?.Key;
+        if (_controlador is not null && key != "panel") return;
+        EstadoMonitor? under = MonitorUnderCursor();
+        switch (key)
         {
             case "ampliar":
-                if (under is not null && PantallasLocales.SegmentAt(under, Cursor.Position) is { } s) _pantallas.Maximize(under, s);
+                if (under is not null && under.Usables.FirstOrDefault(z => new Rectangle(z.X, z.Y, z.Ancho, z.Alto).Contains(Cursor.Position)) is { } z)
+                    _ = _p.Ampliar(under.Id, z.Zona);
                 break;
             case "restaurar":
-                if (under is not null) _pantallas.RestoreGrid(under);
-                else _pantallas.RestoreAllGrids();
+                _ = _p.Restaurar(under?.Id);
                 break;
             case "siguiente":
-                if (under is not null) _pantallas.StepMaximize(under, +1);
+                if (under is not null) _ = _p.AmpliarSiguiente(under.Id, +1);
                 break;
             case "anterior":
-                if (under is not null) _pantallas.StepMaximize(under, -1);
+                if (under is not null) _ = _p.AmpliarSiguiente(under.Id, -1);
                 break;
             case "panel":
                 if (Visible && WindowState != FormWindowState.Minimized && ActiveForm == this) HideToTray();
@@ -788,127 +911,130 @@ internal sealed class MainForm : Form
                 CloseAll();
                 break;
             case "cerrarmonitor":
-                if (under is not null) _pantallas.CloseMonitor(under);
+                if (under is not null) _ = _p.CerrarMonitor(under.Id);
                 break;
         }
     }
 
     private void ShowMonitorMenu(MonitorTile view)
     {
-        PantallaMonitor tile = view.Model;
+        EstadoMonitor m = view.Data;
         var menu = Theme.Menu();
-        menu.Items.Add(new ToolStripLabel($"Monitor {tile.Number}{(tile.Monitor.IsPrimary ? " (principal)" : "")}") { Enabled = false });
+        menu.Items.Add(new ToolStripLabel($"Monitor {m.Numero}{(m.Principal ? " (principal)" : "")}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
-        var incl = new ToolStripMenuItem(tile.Excluded ? "Incluir esta pantalla" : "Omitir esta pantalla") { Checked = tile.Excluded };
-        incl.Click += (_, _) => _pantallas.ToggleExcluded(tile);
+        var incl = new ToolStripMenuItem(m.Omitido ? "Incluir esta pantalla" : "Omitir esta pantalla") { Checked = m.Omitido };
+        incl.Click += (_, _) => _ = _p.AlternarOmitir(m.Id);
         menu.Items.Add(incl);
-        if (tile.Monitor.IsCombined)
-            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(tile)));
-        if (_pantallas.HasCustomNumbering())
-            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _pantallas.ResetNumbering()));
+        if (m.Combinado)
+            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(m)));
+        if (_estado.NumeracionPropia)
+            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _ = _p.NumeracionOriginal()));
         menu.Show(Cursor.Position);
     }
 
-    private void ShowSegmentMenu(MonitorTile view, Segment seg)
+    private async void ShowSegmentMenu(MonitorTile view, EstadoZona zona)
     {
-        PantallaMonitor tile = view.Model;
-        if (_pantallas.Browser is null)
+        EstadoMonitor m = view.Data;
+        if (_estado.Navegador is null)
         {
             MessageBox.Show(this, "No hay navegador compatible instalado.", "IGP_Soft",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
+        bool abriendo = zona.Estado == EstadosZona.Abriendo;
+        List<VentanaAbierta> ventanas = zona.Desactivada || abriendo ? new() : await _p.VentanasAbiertas();
+        if (IsDisposed) return;
+
         var menu = Theme.Menu();
-        int usable = tile.Usable.Count();
-        string zona = seg.Disabled ? " · zona sin usar" : usable > 1 ? $" · zona {tile.DisplayNumber(seg)}/{usable}" : "";
-        menu.Items.Add(new ToolStripLabel($"Monitor {tile.Number}{zona}") { Enabled = false });
+        int usable = m.Usables.Count();
+        string label = zona.Desactivada ? " · zona sin usar" : usable > 1 ? $" · zona {m.NumeroVisible(zona)}/{usable}" : "";
+        menu.Items.Add(new ToolStripLabel($"Monitor {m.Numero}{label}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
 
-        if (!seg.Disabled && tile.Usable.Count() > 1)
+        if (!zona.Desactivada && usable > 1)
         {
-            ToolStripMenuItem ampliar = tile.Maximized == seg
-                ? new ToolStripMenuItem("⤡  Volver a la grilla", null, (_, _) => _pantallas.RestoreGrid(tile))
-                : new ToolStripMenuItem("⤢  Ampliar a todo el monitor", null, (_, _) => _pantallas.Maximize(tile, seg)) { Enabled = seg.Busy };
-            HotkeyAction act = Hotkeys.Actions[tile.Maximized == seg ? 1 : 0];
-            if (Hotkeys.Get(act) != Keys.None) ampliar.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(act));
+            ToolStripMenuItem ampliar = m.Ampliada == zona.Zona
+                ? new ToolStripMenuItem("⤡  Volver a la grilla", null, (_, _) => _ = _p.Restaurar(m.Id))
+                : new ToolStripMenuItem("⤢  Ampliar a todo el monitor", null, (_, _) => _ = _p.Ampliar(m.Id, zona.Zona)) { Enabled = zona.Ocupada };
+            HotkeyAction act = Hotkeys.Actions[m.Ampliada == zona.Zona ? 1 : 0];
+            if (Hotkeys.Get(act) != Keys.None && !Remoto) ampliar.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(act));
             menu.Items.Add(ampliar);
         }
 
         var disenar = new ToolStripMenuItem("▦  Diseñar grilla de este monitor…");
-        disenar.Click += (_, _) => EditLayout(tile);
+        disenar.Click += (_, _) => EditLayout(m);
         menu.Items.Add(disenar);
 
-        if (seg.Disabled)
+        if (zona.Desactivada)
         {
             var usar = new ToolStripMenuItem("✓  Usar esta zona");
-            usar.Click += (_, _) => _pantallas.ToggleZone(tile, seg);
+            usar.Click += (_, _) => ToggleZone(m, zona);
             menu.Items.Add(usar);
             menu.Show(Cursor.Position);
             return;
         }
 
-        if (tile.Segments.Count > 1)
+        if (m.Zonas.Count > 1)
         {
             var noUsar = new ToolStripMenuItem("⊘  No usar esta zona") { Enabled = usable > 1 };
-            noUsar.Click += (_, _) => _pantallas.ToggleZone(tile, seg);
+            noUsar.Click += (_, _) => ToggleZone(m, zona);
             menu.Items.Add(noUsar);
         }
 
         var omitir = new ToolStripMenuItem("Omitir esta pantalla");
-        omitir.Click += (_, _) => _pantallas.ToggleExcluded(tile);
+        omitir.Click += (_, _) => _ = _p.AlternarOmitir(m.Id);
         menu.Items.Add(omitir);
-        AddMonitorItems(menu, tile);
+        AddMonitorItems(menu, m);
         menu.Items.Add(new ToolStripSeparator());
 
-        if (seg.Launched is not null || seg.Pending is not null)
+        if (zona.Estado is EstadosZona.EnPantalla or EstadosZona.Abriendo)
         {
             var cerrar = new ToolStripMenuItem(
-                seg.Pending is not null ? "✖  Cancelar apertura"
-                : seg.Launched?.Attached == true ? "↩  Soltar ventana (devolverla al escritorio)"
+                abriendo ? "✖  Cancelar apertura"
+                : zona.Adjunta ? "↩  Soltar ventana (devolverla al escritorio)"
                 : "✖  Cerrar esta ventana");
-            cerrar.Click += (_, _) => _pantallas.CloseZone(tile, seg);
+            cerrar.Click += (_, _) => _ = _p.Cerrar(m.Id, zona.Zona);
             menu.Items.Add(cerrar);
             menu.Items.Add(new ToolStripSeparator());
         }
 
         foreach (LinkDef link in LinkStore.Links)
         {
-            bool aqui = seg.Link?.Url == link.Url;
-            bool enOtro = _pantallas.IsOpen(link.Url) && !aqui;
+            bool aqui = string.Equals(zona.Url, link.Url, StringComparison.Ordinal);
+            bool enOtro = _estado.EstaAbierto(link.Url) && !aqui;
             var item = new ToolStripMenuItem((aqui ? "" : "Abrir: ") + link.Titulo)
             {
                 Checked = aqui,
-                Enabled = !enOtro && !aqui && seg.Pending is null,
+                Enabled = !enOtro && !aqui && !abriendo,
             };
             if (enOtro) item.Text += "   (ya abierto)";
             LinkDef captured = link;
-            item.Click += (_, _) => Open(tile, seg, captured);
+            item.Click += (_, _) => Open(m.Id, zona.Zona, captured);
             menu.Items.Add(item);
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…") { Enabled = seg.Pending is null };
-        custom.Click += (_, _) => AddCustomElement(tile, seg);
+        var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…") { Enabled = !abriendo };
+        custom.Click += (_, _) => AddCustomElement(m, zona);
         menu.Items.Add(custom);
-        menu.Items.Add(BuildAttachMenu(tile, seg));
+        menu.Items.Add(BuildAttachMenu(m, zona, ventanas, abriendo));
 
         menu.Show(Cursor.Position);
     }
 
-    private ToolStripMenuItem BuildAttachMenu(PantallaMonitor tile, Segment seg)
+    private ToolStripMenuItem BuildAttachMenu(EstadoMonitor m, EstadoZona zona, List<VentanaAbierta> ventanas, bool abriendo)
     {
-        var attach = new ToolStripMenuItem("▣  Adjuntar ventana abierta") { Enabled = seg.Pending is null };
-        foreach (OpenWindow w in _pantallas.ListOpenWindows())
+        var attach = new ToolStripMenuItem("▣  Adjuntar ventana abierta") { Enabled = !abriendo };
+        foreach (VentanaAbierta w in ventanas)
         {
-            string spec = PantallasLocales.SpecOf(w);
-            string title = w.Title.Length > 70 ? w.Title[..67] + "…" : w.Title;
-            var item = new ToolStripMenuItem($"{title}   — {w.ProcessName}".Replace("&", "&&"))
+            string title = w.Titulo.Length > 70 ? w.Titulo[..67] + "…" : w.Titulo;
+            var item = new ToolStripMenuItem($"{title}   — {w.Proceso}".Replace("&", "&&"))
             {
-                Enabled = !_pantallas.IsOpen(spec),
+                Enabled = !_estado.EstaAbierto(w.Spec),
             };
-            OpenWindow captured = w;
-            item.Click += (_, _) => Open(tile, seg, new LinkDef("▣ " + captured.Title, spec));
+            VentanaAbierta captured = w;
+            item.Click += (_, _) => Open(m.Id, zona.Zona, new LinkDef("▣ " + captured.Titulo, captured.Spec));
             attach.DropDownItems.Add(item);
         }
         if (attach.DropDownItems.Count == 0)
@@ -916,12 +1042,12 @@ internal sealed class MainForm : Form
         return attach;
     }
 
-    private async void AddCustomElement(PantallaMonitor tile, Segment seg)
+    private async void AddCustomElement(EstadoMonitor m, EstadoZona zona)
     {
-        if (tile.Excluded) return;
+        if (m.Omitido) return;
         string titulo, target;
         bool addToList;
-        using (var d = new CustomElementForm(tile.Number))
+        using (var d = new CustomElementForm(m.Numero))
         {
             if (d.ShowDialog(this) != DialogResult.OK) return;
             (titulo, target, addToList) = (d.Titulo, d.Target, d.AddToList);
@@ -929,6 +1055,12 @@ internal sealed class MainForm : Form
 
         if (AssetStore.IsExternalFile(target))
         {
+            if (Remoto)
+            {
+                MessageBox.Show(this, "En el control remoto solo se pueden abrir direcciones web (http o https).",
+                    "Elemento personalizado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             UseWaitCursor = true;
             try { target = await Task.Run(() => AssetStore.Import(target)); }
             finally { UseWaitCursor = false; }
@@ -936,7 +1068,7 @@ internal sealed class MainForm : Form
 
         var link = new LinkDef(titulo, target);
         link = addToList ? LinkStore.Add(link) : link;
-        Open(tile, seg, link);
+        Open(m.Id, zona.Zona, link);
     }
 
     private void KeepPanelInFront(bool wasActive)
@@ -945,30 +1077,41 @@ internal sealed class MainForm : Form
         Activate();
     }
 
-    private void ShowGridPicker(MonitorTile view, Point screen)
+    private void ToggleZone(EstadoMonitor m, EstadoZona zona)
     {
-        PantallaMonitor tile = view.Model;
-        GridPicker.Show(this, screen, tile.Cols, tile.Rows, (c, r) => _pantallas.SetGrid(tile, c, r), () => EditLayout(tile));
+        GridLayout grid = m.Layout();
+        var zones = grid.Zones.Select((z, i) => i == zona.Zona ? z with { Off = !z.Off } : z).ToList();
+        GridLayout next = grid.With(zones);
+        if (next.ActiveCount == 0) return;
+        _ = _p.CambiarGrilla(m.Id, next);
     }
 
-    private void EditLayout(PantallaMonitor tile)
+    private void ShowGridPicker(MonitorTile view, Point screen)
     {
-        var contents = tile.Segments.Where(s => s.Link is not null).ToDictionary(s => s.Index, s => s.Link!.Titulo);
-        using var f = new LayoutEditorForm(tile.Number, new Size(tile.Monitor.Width, tile.Monitor.Height), tile.Grid, contents);
+        EstadoMonitor m = view.Data;
+        GridPicker.Show(this, screen, m.Columnas, m.Filas, (c, r) => _ = _p.CambiarGrilla(m.Id, GridLayout.Uniform(c, r)), () => EditLayout(m));
+    }
+
+    private void EditLayout(EstadoMonitor m)
+    {
+        var contents = m.Zonas.Where(z => z.Url is not null).ToDictionary(z => z.Zona, z => z.Titulo ?? "");
+        using var f = new LayoutEditorForm(m.Numero, new Size(m.Ancho, m.Alto), m.Layout(), contents);
         if (f.ShowDialog(this) != DialogResult.OK) return;
-        _pantallas.ChangeLayout(tile, f.Result);
+        _ = _p.CambiarGrilla(m.Id, f.Result);
     }
 
     private void ShowGridPickerForAll(Control anchor)
     {
-        PantallaMonitor? first = _pantallas.Monitores.FirstOrDefault(t => !t.Excluded);
+        EstadoMonitor? first = _estado.Monitores.OrderBy(m => m.Numero).FirstOrDefault(m => !m.Omitido);
         if (first is null) return;
-        GridPicker.Show(this, anchor.PointToScreen(new Point(anchor.Width, 0)), first.Cols, first.Rows, (c, r) => _pantallas.SetGridAll(c, r));
+        GridPicker.Show(this, anchor.PointToScreen(new Point(anchor.Width, 0)), first.Columnas, first.Filas, (c, r) => _ = _p.DividirTodos(c, r));
     }
 
-    private void CloseAll()
+    private async void CloseAll()
     {
-        if (!_pantallas.CloseAll())
+        if (_controlador is not null) return;
+        Resultado r = await _p.CerrarTodo();
+        if (!r.Ok && r.Codigo == "nada_abierto" && !IsDisposed)
             MessageBox.Show(this, "No hay ventanas abiertas por este programa.", "Cerrar todas",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
@@ -988,34 +1131,44 @@ internal sealed class MainForm : Form
 
     private void RunStartupProfile(string name)
     {
+        if (_local is null) return;
         LayoutProfile? p = ProfileStore.Get(name);
         if (p is null && !string.IsNullOrWhiteSpace(name) && !ProfileStore.IsLastSession(name))
-            _tray.ShowBalloonTip(4000, "IGP_Soft", $"No existe el perfil «{name}».", ToolTipIcon.Warning);
+            _tray?.ShowBalloonTip(4000, "IGP_Soft", $"No existe el perfil «{name}».", ToolTipIcon.Warning);
 
-        if (p is not null && p.LinkCount > 0 && _pantallas.Browser is not null)
+        bool hide = _modo == ModoPanel.Controlado;
+        if (p is not null && p.LinkCount > 0 && _estado.Navegador is not null)
         {
             ApplyProfile(p);
-            HideToTray();
+            hide = true;
         }
-        _pantallas.SessionReady = true;
-        if (p is not null) _pantallas.SaveLastSession();
+        if (hide) HideToTray();
+        _local.SessionReady = true;
+        if (p is not null) _local.SaveLastSession();
     }
 
     private sealed class MonitorTile : Panel
     {
         private const TextFormatFlags C = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
 
-        public PantallaMonitor Model { get; }
-        public int Number => Model.Number;
-        public MonitorInfo Monitor => Model.Monitor;
-        public bool Excluded => Model.Excluded;
-        public Segment? Maximized => Model.Maximized;
-        public GridLayout Grid => Model.Grid;
-        public List<Segment> Segments => Model.Segments;
+        private EstadoMonitor _data;
+        private GridLayout _grid;
+
+        public EstadoMonitor Data
+        {
+            get => _data;
+            set
+            {
+                _data = value;
+                _grid = value.Layout();
+            }
+        }
+
+        public string Id => _data.Id;
         public bool DropTarget { get; set; }
         public Bitmap? Preview { get; set; }
 
-        public event Action<MonitorTile, Segment>? SegmentActivated;
+        public event Action<MonitorTile, EstadoZona>? ZoneActivated;
         public event Action<MonitorTile>? MonitorMenuRequested;
         public event Action<MonitorTile, Point>? GridRequested;
         public event Action<MonitorTile, Point>? DragMoved;
@@ -1025,6 +1178,32 @@ internal sealed class MainForm : Form
         private bool _pressed;
         private bool _dragging;
         private bool _suppressClick;
+        private bool _hover;
+        private bool _hoverCtrl;
+        private int? _hoverZone;
+        private Rectangle _ctrlRect;
+
+        public MonitorTile(EstadoMonitor data)
+        {
+            _data = data;
+            _grid = data.Layout();
+            DoubleBuffered = true;
+            Cursor = Cursors.Hand;
+            BackColor = Theme.Background;
+            MouseEnter += (_, _) => { _hover = true; Invalidate(); };
+            MouseLeave += (_, _) => { _hover = false; _hoverZone = null; _hoverCtrl = false; Invalidate(); };
+        }
+
+        private RectangleF RectOf(EstadoZona z) =>
+            z.Zona < _grid.Zones.Count ? _grid.AreaOf(_grid.Zones[z.Zona], new SizeF(Width, Height)) : RectangleF.Empty;
+
+        private EstadoZona? ZoneAt(Point p) => _data.Zonas.FirstOrDefault(z => RectOf(z).Contains(p));
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { Preview?.Dispose(); Preview = null; }
+            base.Dispose(disposing);
+        }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -1050,44 +1229,20 @@ internal sealed class MainForm : Form
             _pressed = false;
         }
 
-        private bool _hover;
-        private bool _hoverCtrl;
-        private Segment? _hoverSeg;
-        private Rectangle _ctrlRect;
-
-        public MonitorTile(PantallaMonitor model)
-        {
-            Model = model;
-            DoubleBuffered = true;
-            Cursor = Cursors.Hand;
-            BackColor = Theme.Background;
-            MouseEnter += (_, _) => { _hover = true; Invalidate(); };
-            MouseLeave += (_, _) => { _hover = false; _hoverSeg = null; _hoverCtrl = false; Invalidate(); };
-        }
-
-        private RectangleF RectOf(Segment s) => Grid.AreaOf(s.Spec, new SizeF(Width, Height));
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) { Preview?.Dispose(); Preview = null; }
-            base.Dispose(disposing);
-        }
-
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
             if (_suppressClick) { _suppressClick = false; return; }
 
-            if (!Excluded && _ctrlRect.Contains(e.Location))
+            if (!_data.Omitido && _ctrlRect.Contains(e.Location))
             {
                 GridRequested?.Invoke(this, PointToScreen(new Point(_ctrlRect.Left, _ctrlRect.Bottom + 2)));
                 return;
             }
 
-            if (Excluded) { MonitorMenuRequested?.Invoke(this); return; }
+            if (_data.Omitido) { MonitorMenuRequested?.Invoke(this); return; }
 
-            Segment? seg = Segments.FirstOrDefault(s => RectOf(s).Contains(e.Location));
-            if (seg is not null) SegmentActivated?.Invoke(this, seg);
+            if (ZoneAt(e.Location) is { } z) ZoneActivated?.Invoke(this, z);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -1098,7 +1253,7 @@ internal sealed class MainForm : Form
                 _dragging = true;
                 Capture = true;
                 Cursor = Cursors.SizeAll;
-                _hoverSeg = null;
+                _hoverZone = null;
                 Invalidate();
             }
             if (_dragging)
@@ -1106,10 +1261,10 @@ internal sealed class MainForm : Form
                 DragMoved?.Invoke(this, PointToScreen(e.Location));
                 return;
             }
-            Segment? over = Excluded || _ctrlRect.Contains(e.Location) ? null : Segments.FirstOrDefault(s => RectOf(s).Contains(e.Location));
-            bool onCtrl = !Excluded && _ctrlRect.Contains(e.Location);
-            if (over == _hoverSeg && onCtrl == _hoverCtrl) return;
-            _hoverSeg = over;
+            int? over = _data.Omitido || _ctrlRect.Contains(e.Location) ? null : ZoneAt(e.Location)?.Zona;
+            bool onCtrl = !_data.Omitido && _ctrlRect.Contains(e.Location);
+            if (over == _hoverZone && onCtrl == _hoverCtrl) return;
+            _hoverZone = over;
             _hoverCtrl = onCtrl;
             Invalidate();
         }
@@ -1120,13 +1275,14 @@ internal sealed class MainForm : Form
             g.Clear(Parent?.BackColor ?? Theme.Background);
             Theme.Smooth(g);
 
-            bool preview = Preview is not null && !Excluded;
-            bool live = Segments.Any(s => s.Launched is not null);
+            bool excluded = _data.Omitido;
+            bool preview = Preview is not null && !excluded;
+            bool live = _data.Zonas.Any(z => z.Estado == EstadosZona.EnPantalla);
             var card = new RectangleF(3, 2, Width - 7, Height - 8);
             Theme.Shadow(g, card, 14, _hover ? 6 : 4);
             using var clip = Theme.Round(card, 14);
 
-            Theme.FillRound(g, Excluded ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59), card, 14);
+            Theme.FillRound(g, excluded ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59), card, 14);
             g.SetClip(clip);
             if (preview)
             {
@@ -1134,18 +1290,18 @@ internal sealed class MainForm : Form
                 g.DrawImage(Preview!, card);
             }
 
-            if (!Excluded)
+            if (!excluded)
             {
-                bool multi = Segments.Count > 1;
-                foreach (Segment s in Segments)
+                bool multi = _data.Zonas.Count > 1;
+                foreach (EstadoZona s in _data.Zonas)
                 {
                     RectangleF zr = RectOf(s);
                     zr.Intersect(card);
                     zr.Inflate(multi ? -3f : -6f, multi ? -3f : -6f);
                     if (zr.Width < 4 || zr.Height < 4) continue;
-                    bool hover = s == _hoverSeg;
+                    bool hover = s.Zona == _hoverZone;
 
-                    if (s.Disabled)
+                    if (s.Desactivada)
                     {
                         using var hatch = new System.Drawing.Drawing2D.HatchBrush(System.Drawing.Drawing2D.HatchStyle.BackwardDiagonal,
                             Color.FromArgb(70, 148, 163, 184), Color.FromArgb(preview ? 170 : 90, 15, 23, 42));
@@ -1154,13 +1310,13 @@ internal sealed class MainForm : Form
                         continue;
                     }
 
-                    if (Maximized is not null && s != Maximized)
+                    if (_data.Ampliada is { } amp && s.Zona != amp)
                     {
                         Theme.FillRound(g, Color.FromArgb(150, 15, 23, 42), zr, 8);
                         TextRenderer.DrawText(g, "detrás", Theme.Small, Rectangle.Round(zr), Color.FromArgb(148, 163, 184), C);
                         continue;
                     }
-                    if (s == Maximized)
+                    if (_data.Ampliada == s.Zona)
                     {
                         Theme.DrawRound(g, Color.FromArgb(250, 204, 21), zr, 8, 2.5f);
                         var badge = new RectangleF(zr.X + 8, zr.Y + 40, 150, 22);
@@ -1171,19 +1327,20 @@ internal sealed class MainForm : Form
                         }
                     }
 
+                    bool pending = s.Estado == EstadosZona.Abriendo;
                     Color fill = hover ? Color.FromArgb(preview ? 90 : 120, 37, 99, 235)
-                               : s.Link is not null ? Color.FromArgb(preview ? 0 : 60, 37, 99, 235)
+                               : s.Url is not null ? Color.FromArgb(preview ? 0 : 60, 37, 99, 235)
                                : Color.FromArgb(preview ? 40 : 18, 255, 255, 255);
                     if (fill.A > 0) Theme.FillRound(g, fill, zr, 8);
                     if (multi || hover)
                     {
                         using var zp = Theme.Round(zr, 8);
                         using var pen = new Pen(hover ? Color.FromArgb(147, 197, 253) : Color.FromArgb(preview ? 150 : 60, 255, 255, 255), hover ? 2f : 1f);
-                        if (s.Link is null && !hover) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                        if (s.Url is null && !hover) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                         g.DrawPath(pen, zp);
                     }
 
-                    if (s.Link is null && s.Pending is null)
+                    if (s.Url is null && !pending)
                     {
                         string hint = hover ? "＋  Elegir contenido" : "＋";
                         TextRenderer.DrawText(g, hint, hover ? Theme.BodyBold : Theme.Section, Rectangle.Round(zr),
@@ -1191,9 +1348,9 @@ internal sealed class MainForm : Form
                         continue;
                     }
 
-                    string title = s.Link?.Titulo ?? "";
-                    Color dot = s.Pending is not null ? Color.FromArgb(250, 204, 21) : Color.FromArgb(74, 222, 128);
-                    string txt = s.Pending is not null ? "Abriendo " + title : title;
+                    string title = s.Titulo ?? "";
+                    Color dot = pending ? Color.FromArgb(250, 204, 21) : Color.FromArgb(74, 222, 128);
+                    string txt = pending ? "Abriendo " + title : title;
                     int maxW = (int)zr.Width - 16;
                     int tw = Math.Min(maxW - 22, TextRenderer.MeasureText(txt, Theme.Small).Width);
                     if (maxW < 40) continue;
@@ -1211,26 +1368,26 @@ internal sealed class MainForm : Form
                 g.SetClip(clip);
                 Theme.FillRound(g, _dragging ? Color.FromArgb(150, 255, 255, 255) : Color.FromArgb(150, 37, 99, 235), card, 14);
                 g.ResetClip();
-                string msg = _dragging ? "Suelta sobre otro monitor" : $"⇄  Intercambiar con el monitor {Number}";
+                string msg = _dragging ? "Suelta sobre otro monitor" : $"⇄  Intercambiar con el monitor {_data.Numero}";
                 TextRenderer.DrawText(g, msg, Theme.Section, Rectangle.Round(card), _dragging ? Theme.Text : Color.White, C);
             }
 
-            Color border = DropTarget ? Color.FromArgb(147, 197, 253) : Excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
+            Color border = DropTarget ? Color.FromArgb(147, 197, 253) : excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
             using (var bp = new Pen(border, DropTarget ? 3f : _hover || live ? 2f : 1f))
             {
-                if (Excluded) bp.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                if (excluded) bp.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawPath(bp, clip);
             }
 
-            string name = $"Monitor {Number}" + (Monitor.IsCombined ? $" · Combinado ({Monitor.Members!.Count})" : Monitor.IsPrimary ? " · Principal" : "");
+            string name = $"Monitor {_data.Numero}" + (_data.Combinado ? $" · Combinado ({_data.Miembros})" : _data.Principal ? " · Principal" : "");
             int nw = TextRenderer.MeasureText(name, Theme.SmallBold).Width + 20;
             var tag = new RectangleF(card.X + 10, card.Y + 10, nw, 24);
-            Theme.FillRound(g, Excluded ? Color.FromArgb(203, 213, 225) : Color.FromArgb(215, 15, 23, 42), tag, 12);
-            TextRenderer.DrawText(g, name, Theme.SmallBold, Rectangle.Round(tag), Excluded ? Theme.TextMuted : Color.White, C);
+            Theme.FillRound(g, excluded ? Color.FromArgb(203, 213, 225) : Color.FromArgb(215, 15, 23, 42), tag, 12);
+            TextRenderer.DrawText(g, name, Theme.SmallBold, Rectangle.Round(tag), excluded ? Theme.TextMuted : Color.White, C);
 
-            if (!Excluded)
+            if (!excluded)
             {
-                string label = $"⊞  {Grid.Describe()}  ▾";
+                string label = $"⊞  {_grid.Describe()}  ▾";
                 int w = TextRenderer.MeasureText(label, Theme.SmallBold).Width + 22;
                 _ctrlRect = new Rectangle((int)(card.Right - w - 10), (int)card.Y + 10, w, 24);
                 Theme.FillRound(g, _hoverCtrl ? Theme.Accent : Color.FromArgb(215, 15, 23, 42), _ctrlRect, 12);

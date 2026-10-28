@@ -12,44 +12,110 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        LinkStore.Load();
         Config.Load();
+
+        if (args.Contains(Protocolo.ArgRemoto, StringComparer.OrdinalIgnoreCase))
+        {
+            RunRemote(Arg(args, Protocolo.ArgTubo));
+            return;
+        }
+
+        LinkStore.Load();
         ProfileStore.Load();
 
         if (args.Contains("--selftest", StringComparer.OrdinalIgnoreCase))
         {
             string? extra = args.FirstOrDefault(a => !a.StartsWith("--"));
-            string? brw = args.FirstOrDefault(a => a.StartsWith("--browser="))?["--browser=".Length..];
+            string? brw = Arg(args, "--browser=");
             SelfTest.Run(extra, brw);
             return;
         }
 
-        string? wait = args.FirstOrDefault(a => a.StartsWith("--esperar=", StringComparison.OrdinalIgnoreCase))?["--esperar=".Length..];
-        if (int.TryParse(wait, out int previousPid))
+        if (int.TryParse(Arg(args, "--esperar="), out int previousPid))
         {
             try { using var previous = System.Diagnostics.Process.GetProcessById(previousPid); previous.WaitForExit(30000); }
             catch { }
         }
         Updater.CleanupAfterUpdate();
 
+        bool controlado = args.Contains(Protocolo.ArgControlado, StringComparer.OrdinalIgnoreCase);
         _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out bool isNew);
         if (!isNew)
         {
-            try { using var ev = EventWaitHandle.OpenExisting(ShowEventName); ev.Set(); }
-            catch { }
+            if (!controlado)
+            {
+                try { using var ev = EventWaitHandle.OpenExisting(ShowEventName); ev.Set(); }
+                catch { }
+            }
             return;
         }
 
-        string? perfil = args.FirstOrDefault(a => a.StartsWith("--perfil=", StringComparison.OrdinalIgnoreCase))
-                             ?["--perfil=".Length..].Trim('"');
+        string? perfil = Arg(args, "--perfil=")?.Trim('"');
+        RegisterPortable();
 
         AppDomain.CurrentDomain.UnhandledException += (_, _) => WindowManager.ReleaseAll();
         AppDomain.CurrentDomain.ProcessExit += (_, _) => WindowManager.ReleaseAll();
 
         ApplicationConfiguration.Initialize();
         ToolStripManager.Renderer = new ModernMenuRenderer();
-        Application.Run(new MainForm(perfil ?? Startup.Profile));
+        var pantallas = new PantallasLocales(MainForm.AppIcon);
+        var form = new MainForm(pantallas, controlado ? ModoPanel.Controlado : ModoPanel.Normal, perfil ?? Startup.Profile);
+        SynchronizationContext ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        using (var servidor = ServidorControl.ParaEsteEquipo(pantallas, ui))
+        {
+            servidor.Conectado += equipo => ui.Post(_ => form.SetControlador(equipo), null);
+            servidor.Desconectado += () => ui.Post(_ => form.SetControlador(null), null);
+            servidor.Iniciar();
+            Application.Run(form);
+        }
         GC.KeepAlive(_instanceMutex);
+    }
+
+    private static string? Arg(string[] args, string prefix) =>
+        args.FirstOrDefault(a => a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
+
+    private static void RunRemote(string? tubo)
+    {
+        ApplicationConfiguration.Initialize();
+        ToolStripManager.Renderer = new ModernMenuRenderer();
+        if (string.IsNullOrWhiteSpace(tubo))
+        {
+            MessageBox.Show("Falta indicar la conexión (--tubo=).", "IGP_Soft — Control remoto", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tubo)), 0, 8);
+        using var mutex = new Mutex(initiallyOwned: true, @"Local\IGP_Soft.Remoto.v1." + hash, out bool isNew);
+        if (!isNew) return;
+
+        using var remoto = new PantallasRemotas(tubo);
+        Resultado r = Task.Run(remoto.ConectarAsync).GetAwaiter().GetResult();
+        if (!r.Ok)
+        {
+            MessageBox.Show(r.Mensaje ?? "No se pudo conectar con el otro equipo.", "IGP_Soft — Control remoto",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var form = new MainForm(remoto, ModoPanel.Remoto, "");
+        SynchronizationContext ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        remoto.Reconectando += () => ui.Post(_ => form.ShowInfo("⟳  Se perdió la conexión con el otro equipo. Reconectando…"), null);
+        remoto.Reconectado += () => ui.Post(_ => form.ShowInfo(null), null);
+        remoto.Desconectado += m => ui.Post(_ => form.CloseFromRemote(m), null);
+        Application.Run(form);
+        GC.KeepAlive(mutex);
+    }
+
+    private static void RegisterPortable()
+    {
+        if (AppPaths.IsInstalled) return;
+        try
+        {
+            using Microsoft.Win32.RegistryKey k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\IGP_Soft");
+            k.SetValue("Ruta", Environment.ProcessPath ?? "");
+            k.SetValue("Version", Protocolo.VersionApp);
+        }
+        catch { }
     }
 }
 

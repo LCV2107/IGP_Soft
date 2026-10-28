@@ -46,6 +46,7 @@ internal static class MonitorGroups
                 string.Join("+", ordered.Select(m => m.DeviceName)), r.X, r.Y, r.Width, r.Height, ordered.Any(m => m.IsPrimary))
             {
                 Members = ordered,
+                HardwareId = "grupo:" + string.Join("+", ordered.Select(m => m.Id)),
             });
         }
         return result;
@@ -65,10 +66,10 @@ internal sealed class CombineForm : Form
 
     public List<List<string>> Result { get; private set; }
 
-    public CombineForm(List<MonitorInfo> physical)
+    public CombineForm(List<MonitorInfo> physical, List<List<string>> groups)
     {
         _physical = physical;
-        _groups = MonitorGroups.Saved();
+        _groups = groups;
         Result = _groups;
 
         Theme.StyleWindow(this, darkCaption: false);

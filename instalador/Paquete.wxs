@@ -45,6 +45,7 @@
       </Component>
       <Component Directory="INSTALLFOLDER" Bitness="always64">
         <RegistryValue Root="HKLM" Key="Software\IGP_Soft" Name="Carpeta" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\IGP_Soft" Name="Version" Type="string" Value="$(var.VersionCompleta)" />
       </Component>
     </Feature>
 

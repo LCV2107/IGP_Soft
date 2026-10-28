@@ -57,6 +57,7 @@ jobs:
         run: >-
           dotnet build instalador/IGP_Soft.Instalador.wixproj -c Release
           -p:Version=${{ steps.version.outputs.msi }}
+          -p:VersionCompleta=${{ steps.version.outputs.version }}
           "-p:ProgramaDir=$env:GITHUB_WORKSPACE\salida"
 
       - name: Preparar archivos y huellas SHA-256

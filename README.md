@@ -346,6 +346,21 @@ En **⚙ Ajustes → Actualizaciones** también puedes:
 
 > Si IGP_Soft está en una carpeta donde no se puede escribir (por ejemplo, una USB bloqueada), te ofrecerá abrir la página de descarga para actualizar a mano.
 
+## 16. Manejar las pantallas de otro equipo (con LCVDesk)
+
+Desde LCVDesk puedes manejar las pantallas de otro PC con IGP_Soft como si estuvieras sentado frente a él. Los dos equipos deben tener IGP_Soft instalado y **con la misma versión**.
+
+1. En LCVDesk, conéctate al otro equipo y, en **Complementos**, elige **IGP_Soft**.
+2. Se abre un panel de IGP_Soft con el nombre del otro equipo arriba a la izquierda (*«Controlando PC-SALA»*). Ahí ves sus monitores, sus enlaces y sus perfiles.
+3. Lo que hagas en ese panel ocurre en las pantallas del otro equipo: abrir y cerrar enlaces, dividir en grillas, **Abrir en orden**, **Cerrar todas**, guardar y abrir perfiles. La vista previa de cada monitor muestra lo que tiene en pantalla.
+4. Cierra ese panel cuando termines. Las pantallas del otro equipo **siguen abiertas**.
+
+Mientras alguien lo maneja a distancia, el panel del otro equipo muestra **«Controlado desde [equipo]»** y queda bloqueado. Se libera solo al terminar la conexión.
+
+> Por seguridad, a distancia solo se pueden abrir direcciones web (http o https), archivos de la carpeta `Assets` del otro equipo o enlaces que ya estén en su lista.
+
+> Si las versiones no coinciden, IGP_Soft te dirá qué versión tiene cada equipo. Actualiza el que esté atrasado (punto 15).
+
 ## Dónde se guardan tus datos
 
 - **Instalado:** en `%LocalAppData%\IGP_Soft` (cada usuario de Windows tiene los suyos). Desinstalar el programa **no** borra tus datos.
