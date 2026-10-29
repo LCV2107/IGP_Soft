@@ -244,6 +244,41 @@ public sealed class ArchivosPruebas : IDisposable
     }
 
     [Fact]
+    public async Task Sube_un_powerpoint_y_un_word_sin_macros()
+    {
+        using PantallasRemotas c = await Cliente();
+        (Resultado r1, string? u1) = await c.Subir(Local("Clase de sismos.pptx", Ooxml.Crear("ppt/presentation.xml")), null, default);
+        Assert.True(r1.Ok, r1.Mensaje);
+        Assert.EndsWith("-Clase-de-sismos.pptx", u1);
+        (Resultado r2, string? u2) = await c.Subir(Local("informe.docx", Ooxml.Crear("word/document.xml")), null, default);
+        Assert.True(r2.Ok, r2.Mensaje);
+        Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(_assets)!, u2!)));
+    }
+
+    [Fact]
+    public async Task Un_powerpoint_con_macros_no_pasa_ni_saltandose_al_cliente()
+    {
+        byte[] malo = Ooxml.Crear("ppt/presentation.xml", macros: true);
+        using (PantallasRemotas c = await Cliente())
+            Assert.Equal("contenido_no_valido", (await c.Subir(Local("clase.pptx", malo), null, default)).R.Codigo);
+        await Task.Delay(300);
+
+        (CanalLineas canal, NamedPipeClientStream pipe) = await Crudo();
+        using (pipe)
+        using (canal)
+        {
+            JsonElement ini = await Orden(canal, 2, new JsonObject { ["tipo"] = "subir_inicio", ["sha256"] = Sha(malo), ["nombre"] = "clase.pptx", ["bytes"] = malo.Length });
+            string? subida = Protocolo.Texto(ini, "subida");
+            JsonElement t = await Orden(canal, 3, new JsonObject { ["tipo"] = "subir_trozo", ["subida"] = subida, ["desde"] = 0, ["datos"] = Convert.ToBase64String(malo) });
+            Assert.True(Protocolo.ComoResultado(t).Ok);
+            JsonElement fin = await Orden(canal, 4, new JsonObject { ["tipo"] = "subir_fin", ["subida"] = subida });
+            Assert.Equal("contenido_no_valido", Protocolo.Texto(fin, "error"));
+        }
+        Assert.False(Directory.Exists(Reserva) && Directory.EnumerateFiles(Reserva).Any());
+        Assert.Empty(Directory.GetFiles(_temporal, "*.parcial"));
+    }
+
+    [Fact]
     public async Task Trozos_fuera_de_orden_se_rechazan()
     {
         byte[] datos = Mp4(RecepcionArchivos.Trozo + 10, 5);

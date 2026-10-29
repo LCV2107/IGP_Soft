@@ -19,7 +19,7 @@ internal sealed class LinksPage : Page
         ModernButton delete = ToolButton("✕  Eliminar", DeleteRow);
         delete.Kind = ButtonKind.Danger;
         FlowLayoutPanel bar = ToolBar(
-            ToolButton(envios is null ? "＋  Imagen o video de mi PC" : "＋  Imagen, video o PDF de este equipo", () => _ = AddFile(), primary: true),
+            ToolButton(envios is null ? "＋  Archivo de mi PC" : "＋  Archivo de este equipo", () => _ = AddFile(), primary: true),
             ToolButton("↑  Subir", () => MoveRow(-1)),
             ToolButton("↓  Bajar", () => MoveRow(1)),
             delete,
@@ -46,7 +46,7 @@ internal sealed class LinksPage : Page
         {
             Dock = DockStyle.Bottom, Height = 34, TextAlign = ContentAlignment.BottomLeft, ForeColor = Theme.TextMuted,
             Text = envios is null
-                ? "ⓘ  Las imágenes y videos de tu PC se copian a la carpeta Assets. El orden de la lista es el que usa «Abrir en orden»."
+                ? "ⓘ  Los archivos de tu PC se copian a la carpeta Assets. El orden de la lista es el que usa «Abrir en orden»."
                 : "ⓘ  Los archivos de este equipo se envían a la reserva del otro equipo. El orden de la lista es el que usa «Abrir en orden».",
         };
 
@@ -119,11 +119,9 @@ internal sealed class LinksPage : Page
     {
         using var d = new OpenFileDialog
         {
-            Title = _envios is null ? "Elegir imágenes o videos" : "Elegir archivos para enviar al otro equipo",
+            Title = _envios is null ? "Elegir imágenes, videos o documentos" : "Elegir archivos para enviar al otro equipo",
             Multiselect = true,
-            Filter = _envios is not null ? TiposPermitidos.Filtro
-                : "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
-                  "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
+            Filter = _envios is not null ? TiposPermitidos.Filtro : TiposPermitidos.Filtro + "|Todos los archivos|*.*",
         };
         if (d.ShowDialog(this) != DialogResult.OK) return;
 

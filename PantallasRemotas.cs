@@ -489,8 +489,8 @@ internal sealed class PantallasRemotas : IPantallas, IArchivosRemotos, IDisposab
         {
             "cancelado" => null,
             "archivo_no_encontrado" => $"No se encontró «{nombre}».",
-            "tipo_no_permitido" => "Al otro equipo solo se pueden enviar imágenes, videos y PDF. Los programas y documentos de Office no se envían.",
-            "contenido_no_valido" => $"«{nombre}» no es lo que indica su extensión, así que no se envió.",
+            "tipo_no_permitido" => "Al otro equipo solo se pueden enviar imágenes, videos, PDF y documentos de Word o PowerPoint sin macros. Los programas no se envían.",
+            "contenido_no_valido" => $"«{nombre}» no es lo que indica su extensión o contiene macros, así que no se envió.",
             "demasiado_grande" => detalle ?? "El archivo supera el tamaño que acepta el otro equipo.",
             "sin_espacio" => "No hay espacio suficiente en el disco del otro equipo.",
             "ocupado" => "El otro equipo está recibiendo otro archivo. Inténtalo en un momento.",

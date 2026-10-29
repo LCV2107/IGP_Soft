@@ -217,7 +217,7 @@ internal sealed class GalleryPage : Page
         if (path is null)
         {
             _name.Text = "";
-            _details.Text = "Agrega imágenes o videos con «➕ Agregar archivos…» o arrastrándolos aquí.";
+            _details.Text = "Agrega imágenes, videos o documentos con «➕ Agregar archivos…» o arrastrándolos aquí.";
             return;
         }
 
@@ -225,7 +225,7 @@ internal sealed class GalleryPage : Page
         _preview.Image = Thumbnails.Best(path, 512);
 
         var info = new FileInfo(path);
-        string kind = Thumbnails.KindOf(path) switch
+        string kind = Documentos.Nombre(path) ?? Thumbnails.KindOf(path) switch
         {
             MediaKind.Image => "Imagen",
             MediaKind.Video => "Video",
@@ -314,8 +314,7 @@ internal sealed class GalleryPage : Page
         {
             Title = "Agregar a la galería",
             Multiselect = true,
-            Filter = "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
-                     "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
+            Filter = TiposPermitidos.Filtro + "|Todos los archivos|*.*",
         };
         if (d.ShowDialog(this) == DialogResult.OK) await Import(d.FileNames);
     }

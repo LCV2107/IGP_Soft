@@ -106,7 +106,7 @@ internal sealed record EstadoPantallas(
         p.Id, p.Device, p.Number, p.Monitor.X, p.Monitor.Y, p.Monitor.Width, p.Monitor.Height, p.Monitor.IsPrimary,
         p.Monitor.Members?.Count ?? 1, p.Excluded, p.Cols, p.Rows, p.Grid.Zones.ToList(),
         p.Maximized?.Index,
-        p.Segments.Select(s => new EstadoZona(s.Index, EstadoDe(s), s.Link?.Titulo, s.Link?.Url, s.Launched?.Attached == true,
+        p.Segments.Select(s => new EstadoZona(s.Index, EstadoDe(s), s.Link?.Titulo, s.Link?.Url, s.Launched is { Attached: true, AlCerrar: null },
             s.Area.X, s.Area.Y, s.Area.Width, s.Area.Height)).ToList());
 
     private static string EstadoDe(Segment s) =>

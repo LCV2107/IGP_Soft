@@ -78,7 +78,7 @@ internal sealed class GaleriaRemotaPage : Page
     private int _previewSeq;
 
     public GaleriaRemotaPage(EnviosRemotos envios, Func<IReadOnlyList<GalleryTarget>> targets)
-        : base("Galería", "Imágenes, videos y PDF del otro equipo. Arrastra archivos de este equipo aquí para enviarlos a su reserva.")
+        : base("Galería", "Imágenes, videos y documentos del otro equipo. Arrastra archivos de este equipo aquí para enviarlos a su reserva.")
     {
         _envios = envios;
         _targets = targets;
@@ -309,13 +309,12 @@ internal sealed class GaleriaRemotaPage : Page
         if (f is null)
         {
             _name.Text = "";
-            _details.Text = "Envía imágenes, videos o PDF con «＋ Enviar a la reserva…» o arrastrándolos aquí.";
+            _details.Text = "Envía imágenes, videos, PDF, Word o PowerPoint con «＋ Enviar a la reserva…» o arrastrándolos aquí.";
             return;
         }
 
         _name.Text = f.Nombre;
-        string kind = Path.GetExtension(f.Nombre).Equals(".pdf", StringComparison.OrdinalIgnoreCase) ? "PDF"
-            : Thumbnails.KindOf(f.Nombre) switch
+        string kind = Documentos.Nombre(f.Nombre) ?? Thumbnails.KindOf(f.Nombre) switch
             {
                 MediaKind.Image => "Imagen",
                 MediaKind.Video => "Video",

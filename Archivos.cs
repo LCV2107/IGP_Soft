@@ -11,8 +11,8 @@ internal static class TiposPermitidos
 {
     public const int Cabecera = 4096;
 
-    public const string Filtro = "Imágenes, videos y PDF|*.jpg;*.jpeg;*.jfif;*.png;*.gif;*.webp;*.bmp;*.avif;*.svg;" +
-                                 "*.mp4;*.m4v;*.mov;*.webm;*.mkv;*.ogv;*.ogg;*.pdf";
+    public const string Filtro = "Imágenes, videos, PDF, Word y PowerPoint|*.jpg;*.jpeg;*.jfif;*.png;*.gif;*.webp;*.bmp;*.avif;*.svg;" +
+                                 "*.mp4;*.m4v;*.mov;*.webm;*.mkv;*.ogv;*.ogg;*.pdf;*.docx;*.pptx;*.ppsx";
 
     private static readonly Dictionary<string, string> Mime = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -22,7 +22,12 @@ internal static class TiposPermitidos
         [".mp4"] = "video/mp4", [".m4v"] = "video/mp4", [".mov"] = "video/quicktime",
         [".webm"] = "video/webm", [".mkv"] = "video/x-matroska", [".ogv"] = "video/ogg", [".ogg"] = "video/ogg",
         [".pdf"] = "application/pdf",
+        [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        [".pptx"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        [".ppsx"] = "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
     };
+
+    private static readonly string[] Macros = { "macroenabled", "vbaproject", "vbadata", "activex" };
 
     private static readonly string[] CajasMov = { "ftyp", "moov", "mdat", "wide", "free", "skip", "pnot" };
 
@@ -47,20 +52,49 @@ internal static class TiposPermitidos
         ".ogg" or ".ogv" => Ascii(c, 0, "OggS"),
         ".pdf" => c[..Math.Min(c.Length, 1024)].IndexOf("%PDF-"u8) >= 0,
         ".svg" => EsSvg(c),
+        ".docx" or ".pptx" or ".ppsx" => Empieza(c, 0x50, 0x4B, 0x03, 0x04),
         _ => false,
     };
 
-    public static bool Archivo(string ruta)
+    public static bool Archivo(string ruta, string? nombre = null)
     {
-        if (!Extension(ruta)) return false;
+        nombre ??= ruta;
+        if (!Extension(nombre)) return false;
         try
         {
             using FileStream fs = File.OpenRead(ruta);
             byte[] c = new byte[Cabecera];
             int n = fs.ReadAtLeast(c, c.Length, throwOnEndOfStream: false);
-            return n > 0 && Contenido(ruta, c.AsSpan(0, n));
+            if (n == 0 || !Contenido(nombre, c.AsSpan(0, n))) return false;
+            fs.Position = 0;
+            return Path.GetExtension(nombre).ToLowerInvariant() switch
+            {
+                ".docx" => OfficeSinMacros(fs, "word/document.xml"),
+                ".pptx" or ".ppsx" => OfficeSinMacros(fs, "ppt/presentation.xml"),
+                _ => true,
+            };
         }
         catch { return false; }
+    }
+
+    private static bool OfficeSinMacros(Stream s, string principal)
+    {
+        using var zip = new System.IO.Compression.ZipArchive(s, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+        bool tipos = false, cuerpo = false;
+        foreach (System.IO.Compression.ZipArchiveEntry e in zip.Entries)
+        {
+            string n = e.FullName.Replace('\\', '/');
+            if (Macros.Any(m => n.Contains(m, StringComparison.OrdinalIgnoreCase))) return false;
+            if (n.Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase))
+            {
+                tipos = true;
+                using var r = new StreamReader(e.Open());
+                string xml = r.ReadToEnd();
+                if (Macros.Any(m => xml.Contains(m, StringComparison.OrdinalIgnoreCase))) return false;
+            }
+            if (n.Equals(principal, StringComparison.OrdinalIgnoreCase)) cuerpo = true;
+        }
+        return tipos && cuerpo;
     }
 
     public static string NombreSeguro(string nombre)
@@ -528,14 +562,7 @@ internal sealed class RecepcionArchivos : IDisposable
 
     private static bool ContenidoValido(Subida s)
     {
-        try
-        {
-            using FileStream fs = File.OpenRead(s.Ruta);
-            byte[] c = new byte[TiposPermitidos.Cabecera];
-            int n = fs.ReadAtLeast(c, c.Length, throwOnEndOfStream: false);
-            return n > 0 && TiposPermitidos.Contenido(s.Nombre, c.AsSpan(0, n));
-        }
-        catch { return false; }
+        return TiposPermitidos.Archivo(s.Ruta, s.Nombre);
     }
 
     public JsonObject Cancelar(long id, JsonElement m)

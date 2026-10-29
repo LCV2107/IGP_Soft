@@ -31,6 +31,7 @@ internal static class NativeImage
     public static void Dispose(LaunchedWindow window)
     {
         window.Closed = true;
+        if (window.Tag is VisorPdf pdf) { pdf.Dispose(); return; }
         if (window.Tag is not PictureBox box) return;
         Image? image = box.Image;
         box.Image = null;

@@ -389,7 +389,9 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     public async Task<Resultado> OpenAsync(PantallaMonitor tile, Segment seg, LinkDef link, bool quiet = false)
     {
         bool isWindow = WindowManager.IsWindowSpec(link.Url);
-        if (tile.Excluded || seg.Disabled || seg.Pending is not null || (Browser is null && !isWindow))
+        TipoDocumento documento = Documentos.Existe(link.Url) ? Documentos.Tipo(link.Url) : TipoDocumento.Ninguno;
+        bool office = documento is TipoDocumento.PowerPoint or TipoDocumento.Word;
+        if (tile.Excluded || seg.Disabled || seg.Pending is not null || (Browser is null && !isWindow && documento == TipoDocumento.Ninguno))
             return Resultado.Falla("no_disponible");
 
         if (_openedUrls.Contains(link.Url) && seg.Link?.Url != link.Url)
@@ -411,8 +413,39 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             return r;
         }
 
-        if (!isWindow && NativeImage.Supports(link.Url) &&
-            NativeImage.Show(surface, link.Url, AreaOf(tile, seg)) is { } image)
+        LaunchedWindow? image = null;
+        if (documento == TipoDocumento.Pdf)
+        {
+            var token = new object();
+            seg.Pending = token;
+            seg.Link = link;
+            _openedUrls.Add(link.Url);
+            Notify();
+            image = await Documentos.MostrarPdf(surface, link.Url, AreaOf(tile, seg));
+            (PantallaMonitor? pt, Segment? ps) = FindPending(token);
+            _openedUrls.Remove(link.Url);
+            if (_disposed || pt is null || ps is null)
+            {
+                if (image is not null) NativeImage.Dispose(image);
+                return Resultado.Falla("cancelada");
+            }
+            ps.Pending = null;
+            ps.Link = null;
+            (tile, seg) = (pt, ps);
+            if (image is null && Browser is null)
+            {
+                Notify();
+                CloseSurfaceIfEmpty(tile);
+                var r = new Resultado(false, "pdf", "No se pudo abrir", quiet ? null : $"No se pudo leer el PDF «{link.Titulo}».", Nivel.Aviso);
+                Avisar(r);
+                return r;
+            }
+            if (image is not null) WindowManager.Reposition(image, AreaOf(tile, seg));
+        }
+        else if (!isWindow && !office && NativeImage.Supports(link.Url))
+            image = NativeImage.Show(surface, link.Url, AreaOf(tile, seg));
+
+        if (image is not null)
         {
             seg.Link = link;
             seg.Launched = image;
@@ -424,10 +457,16 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             return Resultado.Bien;
         }
 
-        return isWindow ? await AttachAsync(tile, seg, link, surface, quiet) : await LaunchAsync(tile, seg, link, surface, quiet);
+        if (office)
+            return await AttachAsync(tile, seg, link, surface, quiet,
+                (area, parent) => Documentos.AbrirOffice(link.Url, area, parent), "No se pudo abrir");
+        return isWindow
+            ? await AttachAsync(tile, seg, link, surface, quiet, (area, parent) => WindowManager.Attach(link.Url, area, parent), "No se pudo adjuntar")
+            : await LaunchAsync(tile, seg, link, surface, quiet);
     }
 
-    private async Task<Resultado> AttachAsync(PantallaMonitor tile, Segment seg, LinkDef link, DisplaySurface surface, bool quiet)
+    private async Task<Resultado> AttachAsync(PantallaMonitor tile, Segment seg, LinkDef link, DisplaySurface surface, bool quiet,
+        Func<Rectangle, IntPtr, (LaunchedWindow? Win, string? Error)> attach, string titulo)
     {
         var windowToken = new object();
         seg.Pending = windowToken;
@@ -439,7 +478,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         Rectangle windowArea = AreaOf(tile, seg);
         IntPtr windowParent = surface.Handle;
         Task<(LaunchedWindow? Win, string? Error)> attaching =
-            Task.Run(() => WindowManager.Attach(link.Url, windowArea, windowParent));
+            Task.Run(() => attach(windowArea, windowParent));
         TrackWindowTask(device, attaching);
         (LaunchedWindow? Win, string? Error) result;
         try { result = await attaching; }
@@ -459,8 +498,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             ws.Link = null;
             Notify();
             CloseSurfaceIfEmpty(wt);
-            var r = new Resultado(false, "adjuntar", "No se pudo adjuntar",
-                quiet ? null : $"No se pudo adjuntar «{link.Titulo.TrimStart('▣', ' ')}».\n\n{result.Error}", Nivel.Aviso);
+            var r = new Resultado(false, "adjuntar", titulo,
+                quiet ? null : $"{titulo} «{link.Titulo.TrimStart('▣', ' ')}».\n\n{result.Error}", Nivel.Aviso);
             Avisar(r);
             return r;
         }

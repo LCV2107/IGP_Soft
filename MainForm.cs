@@ -1027,7 +1027,7 @@ internal sealed class MainForm : Form
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        var custom = new ToolStripMenuItem("➕  Elemento personalizado (imagen / video / URL)…") { Enabled = !abriendo };
+        var custom = new ToolStripMenuItem("➕  Elemento personalizado (archivo o URL)…") { Enabled = !abriendo };
         custom.Click += (_, _) => AddCustomElement(m, zona);
         menu.Items.Add(custom);
         menu.Items.Add(BuildAttachMenu(m, zona, ventanas, abriendo));

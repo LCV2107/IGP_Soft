@@ -128,7 +128,7 @@ internal sealed class SettingsPage : Page
         });
         received.Margin = new Padding(0, 6, 0, 0);
         flow.Controls.Add(Section("⇄", "Control remoto",
-            "Cuando otro equipo maneja este con LCVDesk, puede enviar imágenes, videos y PDF. Se guardan en Assets\\Remoto y no se borran solos.",
+            "Cuando otro equipo maneja este con LCVDesk, puede enviar imágenes, videos, PDF y documentos de Word o PowerPoint. Se guardan en Assets\\Remoto y no se borran solos.",
             Row("Tamaño máximo", _cboLimit), received));
 
         _restartForUpdate = restartForUpdate;

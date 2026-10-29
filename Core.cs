@@ -341,6 +341,7 @@ internal sealed class LaunchedWindow
     public volatile bool Hidden;
     public bool Native { get; init; }
     public object? Tag { get; init; }
+    public Action? AlCerrar { get; init; }
     public Rectangle Insets;
     public Rectangle AppliedRegion;
     public int StyleFixes;
@@ -410,20 +411,90 @@ internal static class MediaWrapper
         if (!img && !vid) return null;
 
         string src = System.Net.WebUtility.HtmlEncode(ToBrowserUrl(target));
-        string element = img
-            ? $"<img src=\"{src}\" alt=\"\">"
-            : $"<video src=\"{src}\" autoplay muted loop playsinline></video>";
-
-        string html =
-            "<!doctype html><html><head><meta charset=\"utf-8\"><title>IGP_Soft</title><style>" +
-            "html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}" +
-            "img,video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}" +
-            "</style></head><body>" + element + "</body></html>";
+        string html = img
+            ? "<!doctype html><html><head><meta charset=\"utf-8\"><title>IGP_Soft</title><style>" +
+              "html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}" +
+              "img{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}" +
+              $"</style></head><body><img src=\"{src}\" alt=\"\"></body></html>"
+            : VideoHtml(src);
 
         string path = Path.Combine(dir, $"view_{Guid.NewGuid():N}.html");
         File.WriteAllText(path, html, new UTF8Encoding(false));
         return new Uri(path).AbsoluteUri;
     }
+
+    public static string VideoHtml(string src) => $$$"""
+        <!doctype html><html><head><meta charset="utf-8"><title>IGP_Soft</title><style>
+        html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;font:14px "Segoe UI",sans-serif;color:#fff}
+        body.quieto{cursor:none}
+        video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}
+        #barra{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:14px;background:rgba(20,20,20,.82);transition:opacity .25s;max-width:calc(100% - 32px);box-sizing:border-box}
+        body.quieto #barra{opacity:0;pointer-events:none}
+        button{background:none;border:0;color:#fff;font:600 14px "Segoe UI",sans-serif;padding:6px 9px;border-radius:8px;cursor:pointer;white-space:nowrap}
+        button:hover{background:rgba(255,255,255,.16)}
+        button.activo{background:#2563eb}
+        input[type=range]{accent-color:#3b82f6;cursor:pointer}
+        #avance{flex:1;min-width:60px;width:320px}
+        #volumen{width:80px}
+        #tiempo{font-variant-numeric:tabular-nums;opacity:.85;white-space:nowrap;padding:0 4px}
+        #aviso{position:fixed;top:18px;right:18px;padding:8px 14px;border-radius:12px;background:rgba(20,20,20,.82);font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none}
+        #aviso.ver{opacity:1}
+        @media (max-width:640px){#volumen,#tiempo,#atras,#adelante{display:none}}
+        </style></head><body class="quieto">
+        <video id="v" src="{{{src}}}" autoplay muted loop playsinline></video>
+        <div id="barra">
+        <button id="play" title="Pausar o reproducir (espacio)">⏸</button>
+        <button id="atras" title="Retroceder 10 s (←)">−10 s</button>
+        <button id="adelante" title="Avanzar 10 s (→)">+10 s</button>
+        <input id="avance" type="range" min="0" max="1000" value="0" title="Avance">
+        <span id="tiempo">0:00 / 0:00</span>
+        <button id="sonido" title="Silenciar o activar el sonido (M)">🔇</button>
+        <input id="volumen" type="range" min="0" max="100" value="100" title="Volumen (↑ ↓)">
+        <button id="velocidad" title="Velocidad (&lt; &gt;)">1×</button>
+        <button id="bucle" class="activo" title="Repetir en bucle (L)">↻ Bucle</button>
+        </div>
+        <div id="aviso"></div>
+        <script>
+        const v=document.getElementById('v'),$=id=>document.getElementById(id);
+        const velocidades=[0.25,0.5,0.75,1,1.25,1.5,2,3];
+        let ocultar=0,avisar=0,arrastrando=false;
+        const hora=t=>{if(!isFinite(t))return '0:00';t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=String(t%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s};
+        const rapidez=r=>String(r).replace('.',',')+'×';
+        const aviso=t=>{const a=$('aviso');a.textContent=t;a.classList.add('ver');clearTimeout(avisar);avisar=setTimeout(()=>a.classList.remove('ver'),1200)};
+        const mostrar=()=>{document.body.classList.remove('quieto');clearTimeout(ocultar);ocultar=setTimeout(()=>{if(!$('barra').matches(':hover'))document.body.classList.add('quieto')},2500)};
+        const pintar=()=>{$('play').textContent=v.paused?'▶':'⏸';$('sonido').textContent=v.muted||v.volume===0?'🔇':'🔊';$('volumen').value=v.muted?0:Math.round(v.volume*100);$('velocidad').textContent=rapidez(v.playbackRate);$('bucle').classList.toggle('activo',v.loop);$('tiempo').textContent=hora(v.currentTime)+' / '+hora(v.duration);if(!arrastrando&&v.duration)$('avance').value=Math.round(v.currentTime/v.duration*1000)};
+        const alternar=()=>{v.paused?v.play():v.pause()};
+        const saltar=d=>{v.currentTime=Math.max(0,Math.min(v.duration||0,v.currentTime+d));aviso((d>0?'+':'−')+Math.abs(d)+' s')};
+        const silencio=()=>{v.muted=!v.muted;if(!v.muted&&v.volume===0)v.volume=1;aviso(v.muted?'Sin sonido':'Con sonido')};
+        const volumen=d=>{v.volume=Math.max(0,Math.min(1,Math.round((v.volume+d)*10)/10));v.muted=v.volume===0;aviso('Volumen '+Math.round(v.volume*100)+' %')};
+        const velocidad=d=>{let i=velocidades.indexOf(v.playbackRate);if(i<0)i=3;i=Math.max(0,Math.min(velocidades.length-1,i+d));v.playbackRate=velocidades[i];aviso('Velocidad '+rapidez(velocidades[i]))};
+        const bucle=()=>{v.loop=!v.loop;aviso(v.loop?'Bucle activado':'Bucle desactivado')};
+        $('play').onclick=alternar;$('atras').onclick=()=>saltar(-10);$('adelante').onclick=()=>saltar(10);
+        $('sonido').onclick=silencio;$('bucle').onclick=bucle;
+        $('velocidad').onclick=e=>velocidad(e.shiftKey?-1:1);
+        $('velocidad').oncontextmenu=e=>{e.preventDefault();velocidad(-1)};
+        $('volumen').oninput=e=>{v.volume=e.target.value/100;v.muted=v.volume===0};
+        $('avance').oninput=e=>{arrastrando=true;if(v.duration)v.currentTime=e.target.value/1000*v.duration};
+        $('avance').onchange=()=>{arrastrando=false};
+        v.onclick=alternar;
+        ['play','pause','volumechange','ratechange','timeupdate','durationchange','loadedmetadata'].forEach(n=>v.addEventListener(n,pintar));
+        document.addEventListener('mousemove',mostrar);
+        document.addEventListener('keydown',e=>{const k=e.key;let hecho=true;
+        if(k===' '||k==='k'||k==='K')alternar();
+        else if(k==='ArrowRight')saltar(e.shiftKey?30:5);
+        else if(k==='ArrowLeft')saltar(e.shiftKey?-30:-5);
+        else if(k==='ArrowUp')volumen(0.1);
+        else if(k==='ArrowDown')volumen(-0.1);
+        else if(k==='m'||k==='M')silencio();
+        else if(k==='l'||k==='L')bucle();
+        else if(k==='>'||k==='.')velocidad(1);
+        else if(k==='<'||k===',')velocidad(-1);
+        else if(k==='Home')v.currentTime=0;
+        else hecho=false;
+        if(hecho){e.preventDefault();mostrar()}});
+        pintar();
+        </script></body></html>
+        """;
 
     private static string ExtensionOf(string target)
     {
@@ -494,6 +565,7 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--metrics-recording-only");
                 if (!Profiles.HardwareAcceleration) psi.ArgumentList.Add("--disable-gpu");
                 psi.ArgumentList.Add("--disable-search-engine-choice-screen");
+                psi.ArgumentList.Add("--autoplay-policy=no-user-gesture-required");
                 psi.ArgumentList.Add($"--window-position={onScreen.X},{onScreen.Y}");
                 psi.ArgumentList.Add($"--window-size={area.Width},{area.Height}");
                 if (running) psi.ArgumentList.Add("--new-window");
@@ -745,7 +817,24 @@ internal static class WindowManager
     {
         OpenWindow? w = FindOpenWindow(spec);
         if (w is null) return (null, "La ventana ya no está abierta.");
+        return Attach(w, area, parentHwnd, null);
+    }
 
+    public static (LaunchedWindow? Win, string? Error) Attach(IntPtr hwnd, Rectangle area, IntPtr parentHwnd, Action? alCerrar)
+    {
+        if (!NativeMethods.IsWindow(hwnd)) return (null, "La ventana ya no está abierta.");
+        NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+        string name = "";
+        try { using var pr = Process.GetProcessById((int)pid); name = pr.ProcessName; }
+        catch { }
+        int len = NativeMethods.GetWindowTextLength(hwnd);
+        var title = new StringBuilder(len + 1);
+        NativeMethods.GetWindowText(hwnd, title, title.Capacity);
+        return Attach(new OpenWindow(hwnd, (int)pid, name, title.ToString()), area, parentHwnd, alCerrar);
+    }
+
+    private static (LaunchedWindow? Win, string? Error) Attach(OpenWindow w, Rectangle area, IntPtr parentHwnd, Action? alCerrar)
+    {
         IntPtr h = w.Hwnd;
         Diagnostico.Log($"Adjuntar «{w.Title}» — {w.ProcessName} (pid {w.Pid}), {Diagnostico.Awareness(h)}");
         var sw = Stopwatch.StartNew();
@@ -767,6 +856,7 @@ internal static class WindowManager
             OriginalStyle = NativeMethods.GetWindowLongPtr(h, NativeMethods.GWL_STYLE).ToInt64(),
             OriginalBounds = original,
             WasMaximized = maximized,
+            AlCerrar = alCerrar,
         };
 
         sw.Restart();
@@ -857,6 +947,16 @@ internal static class WindowManager
             win.Released = true;
 
             IntPtr h = win.Hwnd;
+            if (win.AlCerrar is not null)
+            {
+                if (NativeMethods.IsWindow(h))
+                {
+                    NativeMethods.ShowWindowAsync(h, 0);
+                    NativeMethods.SetParent(h, IntPtr.Zero);
+                }
+                win.AlCerrar();
+                return;
+            }
             if (!NativeMethods.IsWindow(h)) return;
             var sw = Stopwatch.StartNew();
             NativeMethods.SetParent(h, IntPtr.Zero);
@@ -1043,6 +1143,8 @@ internal static class WindowManager
                 $"\"width\":\"{Css(onScreen.Width)}\",\"height\":\"{Css(onScreen.Height)}\",\"sizemode\":\"normal\"}}}}");
             File.WriteAllText(Path.Combine(dir, "user.js"),
                 "user_pref(\"datareporting.policy.dataSubmissionPolicyBypassNotification\", true);\n" +
+                "user_pref(\"media.autoplay.default\", 0);\n" +
+                "user_pref(\"media.autoplay.blocking_policy\", 0);\n" +
                 "user_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\n" +
                 "user_pref(\"datareporting.healthreport.uploadEnabled\", false);\n" +
                 "user_pref(\"toolkit.telemetry.reportingpolicy.firstRun\", false);\n" +

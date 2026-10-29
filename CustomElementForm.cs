@@ -25,7 +25,7 @@ internal sealed class CustomElementForm : Form
         ClientSize = new Size(524, 300);
 
         var card = new Card { Location = new Point(14, 14), Size = new Size(496, 216), Padding = new Padding(0) };
-        var title = new Label { Text = "Imagen, video o página web", Font = Theme.Section, ForeColor = Theme.Text, AutoSize = true, Location = new Point(20, 16), BackColor = Theme.Surface };
+        var title = new Label { Text = "Imagen, video, documento o página web", Font = Theme.Section, ForeColor = Theme.Text, AutoSize = true, Location = new Point(20, 16), BackColor = Theme.Surface };
         var l1 = new Label { Text = "Título", ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(20, 48), BackColor = Theme.Surface };
         _tituloBox.Location = new Point(10, 68);
         var l2 = new Label { Text = "Archivo o dirección web", ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(20, 112), BackColor = Theme.Surface };
@@ -60,8 +60,7 @@ internal sealed class CustomElementForm : Form
         using var d = new OpenFileDialog
         {
             Title = "Elegir imagen o video",
-            Filter = _filtro ?? "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
-                     "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
+            Filter = _filtro ?? TiposPermitidos.Filtro + "|Todos los archivos|*.*",
         };
         if (d.ShowDialog(this) != DialogResult.OK) return;
         _targetBox.Box.Text = d.FileName;

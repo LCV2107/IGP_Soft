@@ -84,15 +84,42 @@ Las zonas en **verde** tienen algo abierto. Al unir zonas, lo que estaba abierto
 
 Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. También puedes desactivar una zona directamente: clic en ella → **⊘ No usar esta zona** (y para volver a usarla: clic → **✓ Usar esta zona**).
 
-## 4. Mostrar una imagen, un video u otra página
+## 4. Mostrar una imagen, un video, un documento u otra página
 
-En el menú de cualquier zona, elige **➕ Elemento personalizado (imagen / video / URL)…**:
+En el menú de cualquier zona, elige **➕ Elemento personalizado (archivo o URL)…**:
 
-1. Elige un archivo de imagen o video de tu PC, o pega una dirección web.
+1. Elige un archivo de tu PC (imagen, video, PDF, Word o PowerPoint), o pega una dirección web.
 2. Si quieres tenerlo siempre disponible, deja activado *Agregar también a la lista de enlaces*.
-3. Acepta: se muestra en esa zona. Los videos se repiten en bucle y sin sonido.
+3. Acepta: se muestra en esa zona.
 
-Las imágenes y videos de tu PC se **copian a la carpeta `Assets`**, junto al programa. Así siguen funcionando aunque muevas o borres el archivo original, o lleves el programa a otra PC.
+Los archivos de tu PC se **copian a la carpeta `Assets`**, junto al programa. Así siguen funcionando aunque muevas o borres el archivo original, o lleves el programa a otra PC.
+
+### Videos
+
+Los videos empiezan solos, **sin sonido y en bucle**. Al mover el ratón sobre el video aparece una barra de controles, que se oculta sola a los pocos segundos:
+
+| Control | Teclado |
+|---|---|
+| ▶ / ⏸ Reproducir o pausar (también con clic en el video) | Espacio o K |
+| −10 s / +10 s y la barra de avance | ← / → (5 s; con Mayús, 30 s) |
+| 🔇 / 🔊 Sonido y volumen | M · ↑ / ↓ |
+| Velocidad (de 0,25× a 3×; clic derecho para bajar) | < / > |
+| ↻ Bucle sí o no | L |
+
+Para usar el teclado, haz clic una vez en el video.
+
+### PDF y PowerPoint en modo presentación
+
+- **PDF:** se muestra una página a la vez, ajustada a la zona y sin barras.
+- **PowerPoint** (`.pptx` o `.ppsx`): se abre directamente como **presentación**, dentro de la zona, con sus animaciones.
+
+Para pasar de página o de diapositiva, **haz clic una vez** en la zona y usa las **flechas** (→ ↓ avanzan, ← ↑ retroceden). En el PDF también sirven la rueda del ratón, Inicio y Fin. En PowerPoint, un clic también avanza, como en una presentación normal.
+
+### Word
+
+Los documentos de Word (`.docx`) se abren en **Word**, dentro de la zona, en modo de solo lectura (el archivo de `Assets` no se modifica).
+
+Para Word y PowerPoint, el equipo necesita tener Microsoft Office instalado. Por seguridad, no se abren documentos con macros (`.docm`, `.pptm`) ni los formatos antiguos `.doc` y `.ppt`. Al cerrar la zona se cierra también el documento.
 
 ## 5. Adjuntar una ventana de otra aplicación
 
@@ -116,7 +143,7 @@ Todo se maneja desde **una sola ventana**. El menú de la izquierda cambia la p�
 |--------|----------------|
 | **▦ Pantallas** | Los monitores y sus zonas. Arriba tiene los botones rápidos (ver abajo). |
 | **☰ Enlaces** | La lista de lo que se puede mostrar (ver punto 7). |
-| **▤ Galería** | Tus imágenes y videos (ver punto 12). |
+| **▤ Galería** | Tus imágenes, videos y documentos (ver punto 12). |
 | **★ Perfiles** | Guardar y abrir configuraciones completas de pantallas (ver punto 8). |
 | **⇪ Exportar y copias** | .zip, versión portable, copias de seguridad y restaurar (ver punto 11). |
 | **⚙ Ajustes** | Navegador, vista previa, pantalla principal, atajos de teclado, rendimiento, qué abrir al iniciar y sesiones guardadas. Todo se aplica al instante. |
@@ -165,7 +192,7 @@ Clic en cualquier zona de ese monitor → **✕ Cerrar todo en este monitor**. S
 En la página **☰ Enlaces**, edita la tabla directamente. **Los cambios se guardan solos**, no hay que pulsar nada.
 
 - Para agregar un enlace, escribe en la **última fila** (la del asterisco): un **Título** y su **dirección web**.
-- **➕ Imagen o video de mi PC…** agrega uno o varios archivos de una vez (se copian a la carpeta `Assets`).
+- **➕ Archivo de mi PC…** agrega una o varias imágenes, videos o documentos de una vez (se copian a la carpeta `Assets`).
 - **▲ Subir / ▼ Bajar** cambia el orden (es el orden que usa **Abrir en orden**).
 - **✖ Eliminar fila** quita el enlace seleccionado.
 
@@ -258,7 +285,7 @@ Si algún enlace apunta a una imagen o video que todavía está fuera de `Assets
 
 En la página **▤ Galería** ves todo lo que hay en la carpeta `Assets` con su miniatura (imágenes y videos).
 
-- **➕ Agregar archivos…**: elige imágenes o videos de tu PC; se copian a `Assets`. También puedes **arrastrarlos** a la galería.
+- **➕ Agregar archivos…**: elige imágenes, videos o documentos de tu PC; se copian a `Assets`. También puedes **arrastrarlos** a la galería.
 - **Buscar** por nombre y **filtrar** por Imágenes, Videos u Otros.
 - Al elegir un elemento ves su **vista previa** grande, su tamaño, la fecha y si se usa en algún enlace o perfil. Los que están en uso aparecen en **verde**.
 
@@ -308,7 +335,7 @@ IGP_Soft está pensado para muchas pantallas abiertas a la vez sin agotar la mem
 
 - **Un solo navegador para todas las zonas.** Cada zona es una ventana del mismo navegador, en lugar de un navegador completo por zona. Si cierras una zona, las demás siguen funcionando.
 - **Navegador «liviano».** Se desactivan servicios que no hacen falta para mostrar pantallas (telemetría, sincronización, actualizaciones de componentes, precarga de páginas) y se limita la cantidad de procesos internos.
-- **Imágenes sin navegador.** Las imágenes de tu PC (JPG, PNG, GIF, BMP) se muestran directamente en IGP_Soft, sin abrir un navegador. Los videos y las páginas web siguen usando el navegador.
+- **Imágenes y PDF sin navegador.** Las imágenes de tu PC (JPG, PNG, GIF, BMP) y los PDF se muestran directamente en IGP_Soft, sin abrir un navegador. Los videos y las páginas web siguen usando el navegador.
 - **Lo que no se ve, no trabaja.** Cuando amplías una zona (punto 13), las de detrás se ocultan y el navegador deja de dibujarlas hasta que vuelves a la grilla.
 
 En la página **Pantallas**, el chip **Memoria navegador** muestra cuánta RAM usan las pantallas en este momento (también aparece en la tarjeta de estado del menú). Se pone **amarillo** si pasa de la mitad de la RAM del equipo.
@@ -357,21 +384,23 @@ Desde LCVDesk puedes manejar las pantallas de otro PC con IGP_Soft como si estuv
 
 Mientras alguien lo maneja a distancia, el panel del otro equipo muestra **«Controlado desde [equipo]»** y queda bloqueado. Se libera solo al terminar la conexión.
 
-### Enviar imágenes, videos y PDF al otro equipo
+### Enviar imágenes, videos y documentos al otro equipo
 
 Desde el panel remoto puedes usar archivos de **tu** equipo en las pantallas del otro:
 
 - **Galería → Enviar a la reserva…** (o arrastra los archivos a la Galería): los copia al otro equipo sin abrirlos todavía. Así los tienes listos para cuando los necesites.
 - **Elemento personalizado** en una zona, con un archivo de tu equipo: lo copia y lo abre en esa zona. Mientras se copia, la zona muestra *«Copiando al otro equipo… 45 %»*.
-- **Enlaces → Imagen, video o PDF de este equipo**: lo copia y lo agrega a la lista de enlaces del otro equipo.
+- **Enlaces → Archivo de este equipo**: lo copia y lo agrega a la lista de enlaces del otro equipo.
 
 Cada archivo se copia **una sola vez**. Si el otro equipo ya lo tiene, se usa al instante, y los perfiles que lo usan se abren sin volver a copiar nada, aunque no haya conexión. Si la copia se corta, al volver a enviarlo sigue desde donde quedó. Con **Cancelar** se detiene y no queda nada a medias.
 
 Los archivos recibidos se guardan en la carpeta `Assets\Remoto` del otro equipo y no se borran solos. Se pueden eliminar desde la Galería remota, salvo los que use alguna zona, enlace o perfil.
 
-Solo se pueden enviar imágenes (jpg, png, gif, webp, bmp, avif, svg), videos (mp4, m4v, mov, webm, mkv, ogv) y PDF. Los programas, los scripts y los documentos de Office **nunca** se envían. En el equipo controlado, en **Ajustes → Control remoto**, se elige el tamaño máximo por archivo (2 GB si no se cambia).
+Solo se pueden enviar imágenes (jpg, png, gif, webp, bmp, avif, svg), videos (mp4, m4v, mov, webm, mkv, ogv), PDF, Word (docx) y PowerPoint (pptx, ppsx). Los documentos con macros, los programas y los scripts **nunca** se envían. Para abrir Word o PowerPoint, el otro equipo necesita tener Office instalado. En el equipo controlado, en **Ajustes → Control remoto**, se elige el tamaño máximo por archivo (2 GB si no se cambia).
 
-> Por seguridad, a distancia solo se pueden abrir direcciones web (http o https), imágenes, videos y PDF de la carpeta `Assets` del otro equipo, o enlaces que ya estén en su lista.
+> Por seguridad, a distancia solo se pueden abrir direcciones web (http o https), imágenes, videos, PDF y documentos de Word o PowerPoint de la carpeta `Assets` del otro equipo, o enlaces que ya estén en su lista.
+
+Para pasar diapositivas o manejar un video del otro equipo, haz clic en esa zona dentro de LCVDesk y usa el teclado como si estuvieras allí.
 
 > Si las versiones no coinciden, IGP_Soft te dirá qué versión tiene cada equipo. Actualiza el que esté atrasado (punto 15).
 
@@ -387,6 +416,6 @@ Para pasar tus datos de una forma a la otra, usa **⇪ Exportar y copias → Cop
 | `IGP_Soft.enlaces.txt` | La lista de enlaces |
 | `IGP_Soft.perfiles.json` | Los perfiles guardados |
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
-| `Assets\` | Imágenes y videos que agregaste |
+| `Assets\` | Imágenes, videos y documentos que agregaste |
 | `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |
 | `Copias de seguridad\` | Copias automáticas hechas antes de restaurar o actualizar |
