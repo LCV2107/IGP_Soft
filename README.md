@@ -357,7 +357,21 @@ Desde LCVDesk puedes manejar las pantallas de otro PC con IGP_Soft como si estuv
 
 Mientras alguien lo maneja a distancia, el panel del otro equipo muestra **«Controlado desde [equipo]»** y queda bloqueado. Se libera solo al terminar la conexión.
 
-> Por seguridad, a distancia solo se pueden abrir direcciones web (http o https), archivos de la carpeta `Assets` del otro equipo o enlaces que ya estén en su lista.
+### Enviar imágenes, videos y PDF al otro equipo
+
+Desde el panel remoto puedes usar archivos de **tu** equipo en las pantallas del otro:
+
+- **Galería → Enviar a la reserva…** (o arrastra los archivos a la Galería): los copia al otro equipo sin abrirlos todavía. Así los tienes listos para cuando los necesites.
+- **Elemento personalizado** en una zona, con un archivo de tu equipo: lo copia y lo abre en esa zona. Mientras se copia, la zona muestra *«Copiando al otro equipo… 45 %»*.
+- **Enlaces → Imagen, video o PDF de este equipo**: lo copia y lo agrega a la lista de enlaces del otro equipo.
+
+Cada archivo se copia **una sola vez**. Si el otro equipo ya lo tiene, se usa al instante, y los perfiles que lo usan se abren sin volver a copiar nada, aunque no haya conexión. Si la copia se corta, al volver a enviarlo sigue desde donde quedó. Con **Cancelar** se detiene y no queda nada a medias.
+
+Los archivos recibidos se guardan en la carpeta `Assets\Remoto` del otro equipo y no se borran solos. Se pueden eliminar desde la Galería remota, salvo los que use alguna zona, enlace o perfil.
+
+Solo se pueden enviar imágenes (jpg, png, gif, webp, bmp, avif, svg), videos (mp4, m4v, mov, webm, mkv, ogv) y PDF. Los programas, los scripts y los documentos de Office **nunca** se envían. En el equipo controlado, en **Ajustes → Control remoto**, se elige el tamaño máximo por archivo (2 GB si no se cambia).
+
+> Por seguridad, a distancia solo se pueden abrir direcciones web (http o https), imágenes, videos y PDF de la carpeta `Assets` del otro equipo, o enlaces que ya estén en su lista.
 
 > Si las versiones no coinciden, IGP_Soft te dirá qué versión tiene cada equipo. Actualiza el que esté atrasado (punto 15).
 

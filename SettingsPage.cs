@@ -8,6 +8,8 @@ internal sealed class SettingsPage : Page
     private readonly ToggleSwitch _chkGpu = new("Usar la tarjeta de video (aceleración por hardware)");
     private readonly ComboBox _cboReload = new();
     private static readonly int[] ReloadOptions = { 0, 6, 12, 24 };
+    private readonly ComboBox _cboLimit = new();
+    private static readonly long[] LimitOptions = { 500, 1024, 2048, 4096, 8192 };
     private readonly List<(HotkeyAction Action, HotkeyBox Box, Label Status)> _hotkeys = new();
     private bool _loading;
 
@@ -109,6 +111,26 @@ internal sealed class SettingsPage : Page
         flow.Controls.Add(Section("◈", "Sesiones de navegación", "Para páginas que piden usuario y contraseña: inicias sesión una sola vez.",
             Toggle(_chkKeep), wipe));
 
+        _cboLimit.DropDownStyle = ComboBoxStyle.DropDownList;
+        _cboLimit.FlatStyle = FlatStyle.Flat;
+        _cboLimit.Font = Theme.Body;
+        _cboLimit.Width = 220;
+        _cboLimit.Items.AddRange(LimitOptions.Select(mb => mb >= 1024 ? $"{mb / 1024} GB por archivo" : $"{mb} MB por archivo").ToArray<object>());
+        _cboLimit.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_loading && _cboLimit.SelectedIndex >= 0) Config.Set(RecepcionArchivos.ClaveLimite, LimitOptions[_cboLimit.SelectedIndex].ToString());
+        };
+        ModernButton received = ToolButton("▤  Abrir la carpeta de archivos recibidos", () =>
+        {
+            string dir = Path.Combine(AssetStore.Root, RecepcionArchivos.Carpeta);
+            Directory.CreateDirectory(dir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true });
+        });
+        received.Margin = new Padding(0, 6, 0, 0);
+        flow.Controls.Add(Section("⇄", "Control remoto",
+            "Cuando otro equipo maneja este con LCVDesk, puede enviar imágenes, videos y PDF. Se guardan en Assets\\Remoto y no se borran solos.",
+            Row("Tamaño máximo", _cboLimit), received));
+
         _restartForUpdate = restartForUpdate;
         _cboChannel.DropDownStyle = ComboBoxStyle.DropDownList;
         _cboChannel.FlatStyle = FlatStyle.Flat;
@@ -176,6 +198,8 @@ internal sealed class SettingsPage : Page
         _chkNotify.Checked = Updater.Notify;
         RefreshUpdates();
         _cboReload.SelectedIndex = Math.Max(0, Array.IndexOf(ReloadOptions, Profiles.ReloadHours));
+        int li = Array.IndexOf(LimitOptions, RecepcionArchivos.LimiteMB());
+        _cboLimit.SelectedIndex = li >= 0 ? li : Array.IndexOf(LimitOptions, RecepcionArchivos.LimitePorDefectoMB);
         _loading = false;
         RefreshHotkeys();
     }

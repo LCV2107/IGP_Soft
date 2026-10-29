@@ -174,11 +174,12 @@ internal sealed class ListaBlanca
         _conocidos = conocidos;
     }
 
-    public static ListaBlanca DelEquipo(IPantallas pantallas) => new(
-        () => AssetStore.Root,
-        () => LinkStore.Links.Select(l => l.Url)
+    public static ListaBlanca DelEquipo(IPantallas pantallas) => new(() => AssetStore.Root, () => UrlsDelEquipo(pantallas));
+
+    public static IEnumerable<string> UrlsDelEquipo(IPantallas pantallas) =>
+        LinkStore.Links.Select(l => l.Url)
             .Concat(ProfileStore.Items.SelectMany(p => p.Monitors).SelectMany(m => m.Links).Select(z => z.Url))
-            .Concat(pantallas.Estado.Monitores.SelectMany(m => m.Zonas).Select(z => z.Url).OfType<string>()));
+            .Concat(pantallas.Estado.Monitores.SelectMany(m => m.Zonas).Select(z => z.Url).OfType<string>());
 
     public bool Permite(string? url)
     {

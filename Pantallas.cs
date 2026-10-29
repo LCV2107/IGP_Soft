@@ -163,7 +163,7 @@ internal static class Permisos
         if (WindowManager.IsWindowSpec(url)) return true;
         if (Uri.TryCreate(url, UriKind.Absolute, out Uri? u))
             return u.Scheme is "http" or "https" && !u.IsUnc && u.Host.Length > 0;
-        if (!AssetStore.IsAssetPath(url)) return false;
+        if (!AssetStore.IsAssetPath(url) || !TiposPermitidos.Extension(url)) return false;
         string rel = url.Replace('/', '\\');
         if (rel.Split('\\').Any(p => p == "..")) return false;
         try

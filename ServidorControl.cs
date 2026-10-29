@@ -12,19 +12,23 @@ internal sealed class ServidorControl : IDisposable
     private readonly Func<Func<Task<JsonNode>>, Task<JsonNode>> _enUi;
     private readonly ListaBlanca _lista;
     private readonly string _version;
+    private readonly RecepcionArchivos? _archivos;
+    private readonly Func<IEnumerable<string>>? _usados;
     private readonly CancellationTokenSource _cierre = new();
     private readonly object _gate = new();
     private Sesion? _activa;
     private Task? _bucle;
 
     public ServidorControl(IPantallas pantallas, string nombre, Func<Func<Task<JsonNode>>, Task<JsonNode>> enUi,
-        ListaBlanca lista, string version)
+        ListaBlanca lista, string version, RecepcionArchivos? archivos = null, Func<IEnumerable<string>>? usados = null)
     {
         _pantallas = pantallas;
         _nombre = nombre;
         _enUi = enUi;
         _lista = lista;
         _version = version;
+        _archivos = archivos;
+        _usados = usados;
         _pantallas.Cambio += OnCambio;
         _pantallas.Aviso += OnAviso;
     }
@@ -39,7 +43,7 @@ internal sealed class ServidorControl : IDisposable
                 catch (Exception ex) { tcs.SetException(ex); }
             }, null);
             return tcs.Task;
-        }, ListaBlanca.DelEquipo(pantallas), Protocolo.VersionApp);
+        }, ListaBlanca.DelEquipo(pantallas), Protocolo.VersionApp, RecepcionArchivos.DelEquipo(), () => ListaBlanca.UrlsDelEquipo(pantallas));
 
     public event Action<string>? Conectado;
     public event Action? Desconectado;
@@ -144,7 +148,12 @@ internal sealed class ServidorControl : IDisposable
                     break;
                 }
                 JsonNode respuesta;
-                try { respuesta = await _enUi(() => Ejecutar(id, tipo, msg)).ConfigureAwait(false); }
+                try
+                {
+                    respuesta = OrdenesArchivo.Contains(tipo)
+                        ? await EjecutarArchivo(id, tipo, msg).ConfigureAwait(false)
+                        : await _enUi(() => Ejecutar(id, tipo, msg)).ConfigureAwait(false);
+                }
                 catch (Exception ex) { respuesta = Protocolo.Respuesta(id, Resultado.Falla("error_interno", ex.Message)); }
                 await s.Enviar(respuesta).ConfigureAwait(false);
             }
@@ -154,6 +163,7 @@ internal sealed class ServidorControl : IDisposable
         catch (Exception ex) { Diagnostico.Log($"Control: error en la sesión: {ex.Message}"); }
         finally
         {
+            _archivos?.Pausar();
             await s.TerminarAsync().ConfigureAwait(false);
             s.Canal.Dispose();
             lock (_gate) if (_activa == s) _activa = null;
@@ -287,6 +297,35 @@ internal sealed class ServidorControl : IDisposable
         }
     }
 
+    private static readonly HashSet<string> OrdenesArchivo = new()
+    {
+        "tengo_archivo", "subir_inicio", "subir_trozo", "subir_fin", "subir_cancelar", "assets", "borrar_asset", "miniatura",
+    };
+
+    private async Task<JsonNode> EjecutarArchivo(long id, string tipo, JsonElement m)
+    {
+        if (_archivos is not { } a) return Protocolo.Respuesta(id, Resultado.Falla("orden_desconocida"));
+        return tipo switch
+        {
+            "tengo_archivo" => await Task.Run(() => a.Tengo(id, m)).ConfigureAwait(false),
+            "subir_inicio" => await Task.Run(() => a.Inicio(id, m)).ConfigureAwait(false),
+            "subir_trozo" => a.RecibirTrozo(id, m),
+            "subir_fin" => await Task.Run(() => a.Fin(id, m)).ConfigureAwait(false),
+            "subir_cancelar" => a.Cancelar(id, m),
+            "assets" => a.Lista(id, await Usados().ConfigureAwait(false)),
+            "borrar_asset" => a.BorrarArchivo(id, Protocolo.Texto(m, "url"), await Usados().ConfigureAwait(false)),
+            "miniatura" => await a.Miniatura(id, m).ConfigureAwait(false),
+            _ => Protocolo.Respuesta(id, Resultado.Falla("orden_desconocida")),
+        };
+    }
+
+    private async Task<IReadOnlyCollection<string>> Usados()
+    {
+        if (_usados is null) return Array.Empty<string>();
+        JsonNode n = await _enUi(() => Task.FromResult<JsonNode>(new JsonArray(_usados().Select(u => (JsonNode?)u).ToArray()))).ConfigureAwait(false);
+        return n.AsArray().Select(x => x?.GetValue<string>() ?? "").ToList();
+    }
+
     private Sesion? Activa { get { lock (_gate) return _activa; } }
 
     private EstadoPantallas? _pendiente;
@@ -346,6 +385,7 @@ internal sealed class ServidorControl : IDisposable
         s?.Canal.Dispose();
         try { _bucle?.Wait(2000); }
         catch { }
+        _archivos?.Dispose();
     }
 
     private sealed class Sesion

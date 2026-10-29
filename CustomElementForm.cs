@@ -10,8 +10,11 @@ internal sealed class CustomElementForm : Form
     public string Target => _targetBox.Box.Text.Trim();
     public bool AddToList => _add.Checked;
 
-    public CustomElementForm(int monitorNumber)
+    private readonly string? _filtro;
+
+    public CustomElementForm(int monitorNumber, string? filtro = null)
     {
+        _filtro = filtro;
         Theme.StyleWindow(this, darkCaption: false);
         Text = $"Mostrar en el monitor {monitorNumber}";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -57,7 +60,7 @@ internal sealed class CustomElementForm : Form
         using var d = new OpenFileDialog
         {
             Title = "Elegir imagen o video",
-            Filter = "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
+            Filter = _filtro ?? "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
                      "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
         };
         if (d.ShowDialog(this) != DialogResult.OK) return;

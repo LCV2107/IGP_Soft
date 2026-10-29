@@ -1,4 +1,3 @@
-using System.Drawing.Imaging;
 using System.Threading;
 
 namespace IGP_Soft;
@@ -1151,13 +1150,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         return Task.Run<byte[]?>(() =>
         {
             using Bitmap? bmp = CaptureMonitor(m, ancho);
-            if (bmp is null) return null;
-            using var ms = new MemoryStream();
-            var codec = ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid);
-            using var prms = new EncoderParameters(1);
-            prms.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 70L);
-            bmp.Save(ms, codec, prms);
-            return ms.ToArray();
+            return bmp is null ? null : Imagenes.Jpeg(bmp);
         });
     }
 

@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace IGP_Soft;
 
-internal sealed class PantallasRemotas : IPantallas, IDisposable
+internal sealed class PantallasRemotas : IPantallas, IArchivosRemotos, IDisposable
 {
     private readonly string _tubo;
     private readonly string _version;
@@ -227,7 +227,10 @@ internal sealed class PantallasRemotas : IPantallas, IDisposable
         }
     }
 
-    private async Task<JsonElement> Pedir(JsonObject orden, TimeSpan? limite = null)
+    private async Task<JsonElement> Pedir(JsonObject orden, TimeSpan? limite = null) =>
+        await (await Enviar(orden, limite).ConfigureAwait(false)).ConfigureAwait(false);
+
+    private async Task<Task<JsonElement>> Enviar(JsonObject orden, TimeSpan? limite = null)
     {
         CanalLineas canal = _canal ?? throw new IOException("desconectado");
         long id = Interlocked.Increment(ref _siguiente);
@@ -240,7 +243,17 @@ internal sealed class PantallasRemotas : IPantallas, IDisposable
             _pendientes.TryRemove(id, out _);
             throw new InvalidOperationException("mensaje_demasiado_grande");
         }
-        Task fin = await Task.WhenAny(tcs.Task, Task.Delay(limite ?? Protocolo.OrdenPerdida)).ConfigureAwait(false);
+        catch
+        {
+            _pendientes.TryRemove(id, out _);
+            throw new IOException("desconectado");
+        }
+        return Esperar(id, tcs, limite ?? Protocolo.OrdenPerdida);
+    }
+
+    private async Task<JsonElement> Esperar(long id, TaskCompletionSource<JsonElement> tcs, TimeSpan limite)
+    {
+        Task fin = await Task.WhenAny(tcs.Task, Task.Delay(limite)).ConfigureAwait(false);
         if (fin != tcs.Task)
         {
             _pendientes.TryRemove(id, out _);
@@ -355,6 +368,141 @@ internal sealed class PantallasRemotas : IPantallas, IDisposable
         if (!Protocolo.ComoResultado(e).Ok) return null;
         try { return Convert.FromBase64String(Protocolo.Texto(e, "jpeg") ?? ""); }
         catch { return null; }
+    }
+
+    public async Task<(Resultado R, string? Url)> Subir(string ruta, IProgress<double>? progreso, CancellationToken ct)
+    {
+        string nombre = Path.GetFileName(ruta);
+        if (!File.Exists(ruta)) return (FallaArchivo("archivo_no_encontrado", nombre), null);
+        if (!TiposPermitidos.Extension(ruta)) return (FallaArchivo("tipo_no_permitido", nombre), null);
+        if (!TiposPermitidos.Archivo(ruta)) return (FallaArchivo("contenido_no_valido", nombre), null);
+
+        string? subida = null;
+        try { await _subiendo.WaitAsync(ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return (FallaArchivo("cancelado", nombre), null); }
+        try
+        {
+            long bytes = new FileInfo(ruta).Length;
+            string sha = await Task.Run(() => Huellas.De(ruta, ct), ct).ConfigureAwait(false);
+
+            JsonElement t = await Pedir(Datos(("tipo", "tengo_archivo"), ("sha256", sha), ("bytes", bytes)), Largo).ConfigureAwait(false);
+            if (!Protocolo.ComoResultado(t).Ok) return (FallaArchivo(t, nombre), null);
+            if (Protocolo.Leer<bool>(t, "tiene"))
+            {
+                progreso?.Report(1);
+                return (Resultado.Bien, Protocolo.Texto(t, "url"));
+            }
+
+            JsonElement ini = await Pedir(Datos(("tipo", "subir_inicio"), ("sha256", sha), ("nombre", nombre), ("bytes", bytes),
+                ("tipo_mime", TiposPermitidos.TipoMime(ruta))), Largo).ConfigureAwait(false);
+            if (!Protocolo.ComoResultado(ini).Ok) return (FallaArchivo(ini, nombre), null);
+            if (Protocolo.Leer<bool>(ini, "tiene"))
+            {
+                progreso?.Report(1);
+                return (Resultado.Bien, Protocolo.Texto(ini, "url"));
+            }
+            subida = Protocolo.Texto(ini, "subida");
+            long pos = Protocolo.Numero(ini, "recibido") ?? 0;
+            progreso?.Report((double)pos / bytes);
+
+            await using (var fs = new FileStream(ruta, FileMode.Open, FileAccess.Read, FileShare.Read, RecepcionArchivos.Trozo, true))
+            {
+                fs.Seek(pos, SeekOrigin.Begin);
+                var enVuelo = new Queue<Task<JsonElement>>();
+                byte[] buf = new byte[RecepcionArchivos.Trozo];
+                while (pos < bytes || enVuelo.Count > 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (enVuelo.Count >= TrozosEnVuelo || (pos >= bytes && enVuelo.Count > 0))
+                    {
+                        JsonElement r = await enVuelo.Dequeue().ConfigureAwait(false);
+                        if (!Protocolo.ComoResultado(r).Ok) return (FallaArchivo(r, nombre), null);
+                        progreso?.Report((double)(Protocolo.Numero(r, "recibido") ?? 0) / bytes);
+                        continue;
+                    }
+                    int n = await fs.ReadAtLeastAsync(buf.AsMemory(0, (int)Math.Min(buf.Length, bytes - pos)), 1, false, ct).ConfigureAwait(false);
+                    if (n <= 0) return (FallaArchivo("archivo_cambiado", nombre), null);
+                    enVuelo.Enqueue(await Enviar(Datos(("tipo", "subir_trozo"), ("subida", subida), ("desde", pos),
+                        ("datos", Convert.ToBase64String(buf, 0, n)))).ConfigureAwait(false));
+                    pos += n;
+                }
+            }
+
+            JsonElement fin = await Pedir(Datos(("tipo", "subir_fin"), ("subida", subida)), Largo).ConfigureAwait(false);
+            if (!Protocolo.ComoResultado(fin).Ok) return (FallaArchivo(fin, nombre), null);
+            subida = null;
+            progreso?.Report(1);
+            return (Resultado.Bien, Protocolo.Texto(fin, "url"));
+        }
+        catch (OperationCanceledException)
+        {
+            if (subida is not null)
+            {
+                JsonObject cancelar = Datos(("tipo", "subir_cancelar"), ("subida", subida));
+                _ = Task.Run(async () =>
+                {
+                    try { await Pedir(cancelar).ConfigureAwait(false); }
+                    catch { }
+                });
+            }
+            return (FallaArchivo("cancelado", nombre), null);
+        }
+        catch (TimeoutException) { return (FallaArchivo("sin_respuesta", nombre), null); }
+        catch (IOException) { return (FallaArchivo("desconectado", nombre), null); }
+        catch (Exception ex) { return (new Resultado(false, "error_interno", "Enviar archivo", $"No se pudo enviar «{nombre}»: {ex.Message}", Nivel.Error), null); }
+        finally { _subiendo.Release(); }
+    }
+
+    public async Task<List<ArchivoRemoto>?> Archivos()
+    {
+        (Resultado r, JsonElement? e) = await Orden("assets").ConfigureAwait(false);
+        return r.Ok && e is { } v ? Protocolo.Leer<List<ArchivoRemoto>>(v, "archivos") ?? new() : null;
+    }
+
+    public async Task<Resultado> BorrarArchivo(string url)
+    {
+        (Resultado r, JsonElement? e) = await Orden("borrar_asset", Datos(("url", url))).ConfigureAwait(false);
+        return r.Ok || e is not { } v ? r : FallaArchivo(v, Path.GetFileName(url));
+    }
+
+    public async Task<byte[]?> Miniatura(string url, int ancho)
+    {
+        if (_canal is null) return null;
+        JsonElement e;
+        try { e = await Pedir(Datos(("tipo", "miniatura"), ("url", url), ("ancho", ancho))).ConfigureAwait(false); }
+        catch { return null; }
+        if (!Protocolo.ComoResultado(e).Ok) return null;
+        try { return Convert.FromBase64String(Protocolo.Texto(e, "jpeg") ?? ""); }
+        catch { return null; }
+    }
+
+    private static readonly TimeSpan Largo = TimeSpan.FromMinutes(2);
+    private const int TrozosEnVuelo = 4;
+    private readonly SemaphoreSlim _subiendo = new(1, 1);
+
+    private static Resultado FallaArchivo(JsonElement e, string nombre) =>
+        FallaArchivo(Protocolo.Texto(e, "error") ?? "error", nombre, Protocolo.Texto(e, "mensaje"));
+
+    private static Resultado FallaArchivo(string codigo, string nombre, string? detalle = null)
+    {
+        string? mensaje = codigo switch
+        {
+            "cancelado" => null,
+            "archivo_no_encontrado" => $"No se encontró «{nombre}».",
+            "tipo_no_permitido" => "Al otro equipo solo se pueden enviar imágenes, videos y PDF. Los programas y documentos de Office no se envían.",
+            "contenido_no_valido" => $"«{nombre}» no es lo que indica su extensión, así que no se envió.",
+            "demasiado_grande" => detalle ?? "El archivo supera el tamaño que acepta el otro equipo.",
+            "sin_espacio" => "No hay espacio suficiente en el disco del otro equipo.",
+            "ocupado" => "El otro equipo está recibiendo otro archivo. Inténtalo en un momento.",
+            "huella_distinta" => $"«{nombre}» llegó dañado. Vuelve a enviarlo.",
+            "archivo_cambiado" => $"«{nombre}» cambió mientras se enviaba. Vuelve a enviarlo.",
+            "en_uso" => "Ese archivo se usa en una zona, un enlace o un perfil del otro equipo. Quítalo de ahí antes de eliminarlo.",
+            "solo_reserva" => "Solo se pueden eliminar los archivos que se enviaron desde otro equipo.",
+            "sin_respuesta" => "El otro equipo no respondió a tiempo. Si vuelves a enviar el archivo, la copia sigue desde donde quedó.",
+            "desconectado" => "Se perdió la conexión. Si vuelves a enviar el archivo, la copia sigue desde donde quedó.",
+            _ => $"No se pudo completar la operación con «{nombre}» ({codigo}){(detalle is null ? "" : ": " + detalle)}.",
+        };
+        return new Resultado(false, codigo, "Enviar archivo", mensaje, Nivel.Aviso);
     }
 
     public void Dispose()

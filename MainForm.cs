@@ -46,6 +46,9 @@ internal sealed class MainForm : Form
     private Page _screensPage = null!;
     private LinksPage _linksPage = null!;
     private GalleryPage? _galleryPage;
+    private GaleriaRemotaPage? _remoteGallery;
+    private readonly EnviosRemotos? _envios;
+    private readonly Dictionary<(string Monitor, int Zona), string> _copias = new();
     private ProfilesPage _profilesPage = null!;
     private ExportPage? _exportPage;
     private SettingsPage? _settingsPage;
@@ -79,6 +82,7 @@ internal sealed class MainForm : Form
         {
             LinkStore.Remote = list => _ = _p.GuardarEnlaces(list);
             ProfileStore.Remote = list => _ = _p.GuardarPerfiles(list);
+            if (_p is IArchivosRemotos archivos) _envios = new EnviosRemotos(archivos);
         }
 
         BuildLayout();
@@ -207,7 +211,7 @@ internal sealed class MainForm : Form
         _screensPage.Body.Controls.Add(_info);
         _screensPage.Body.Controls.Add(actions);
 
-        _linksPage = new LinksPage();
+        _linksPage = new LinksPage(_envios);
         _linksPage.Changed += () =>
         {
             _local?.Refresh();
@@ -232,7 +236,15 @@ internal sealed class MainForm : Form
             pages.Add(("⇪", "Exportar y copias", _exportPage));
             pages.Add(("⚙", "Ajustes", _settingsPage));
         }
-        else pages.Add(("★", "Perfiles", _profilesPage));
+        else
+        {
+            if (_envios is not null)
+            {
+                _remoteGallery = new GaleriaRemotaPage(_envios, GalleryTargets);
+                pages.Add(("▤", "Galería", _remoteGallery));
+            }
+            pages.Add(("★", "Perfiles", _profilesPage));
+        }
 
         var side = new Panel { Dock = DockStyle.Left, Width = 236, BackColor = Theme.Sidebar };
         var brand = new Panel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Sidebar };
@@ -566,7 +578,7 @@ internal sealed class MainForm : Form
 
         foreach (EstadoMonitor m in _estado.Monitores.OrderBy(m => m.Numero))
         {
-            var tile = new MonitorTile(m);
+            var tile = new MonitorTile(m) { CopyText = CopyText };
             tile.ZoneActivated += ShowSegmentMenu;
             tile.MonitorMenuRequested += ShowMonitorMenu;
             tile.GridRequested += ShowGridPicker;
@@ -1047,7 +1059,7 @@ internal sealed class MainForm : Form
         if (m.Omitido) return;
         string titulo, target;
         bool addToList;
-        using (var d = new CustomElementForm(m.Numero))
+        using (var d = new CustomElementForm(m.Numero, Remoto ? TiposPermitidos.Filtro : null))
         {
             if (d.ShowDialog(this) != DialogResult.OK) return;
             (titulo, target, addToList) = (d.Titulo, d.Target, d.AddToList);
@@ -1057,18 +1069,41 @@ internal sealed class MainForm : Form
         {
             if (Remoto)
             {
-                MessageBox.Show(this, "En el control remoto solo se pueden abrir direcciones web (http o https).",
-                    "Elemento personalizado", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                if (_envios is null) return;
+                string id = m.Id;
+                int z = zona.Zona;
+                SetCopy(id, z, 0);
+                (Resultado R, string? Url) sent;
+                try { sent = await _envios.Enviar(target, f => SetCopy(id, z, f)); }
+                finally { SetCopy(id, z, null); }
+                if (!sent.R.Ok || sent.Url is null)
+                {
+                    if (sent.R.Mensaje is not null) ShowAviso(sent.R);
+                    return;
+                }
+                target = sent.Url;
             }
-            UseWaitCursor = true;
-            try { target = await Task.Run(() => AssetStore.Import(target)); }
-            finally { UseWaitCursor = false; }
+            else
+            {
+                UseWaitCursor = true;
+                try { target = await Task.Run(() => AssetStore.Import(target)); }
+                finally { UseWaitCursor = false; }
+            }
         }
 
         var link = new LinkDef(titulo, target);
         link = addToList ? LinkStore.Add(link) : link;
         Open(m.Id, zona.Zona, link);
+    }
+
+    private string? CopyText(string monitor, int zona) => _copias.GetValueOrDefault((monitor, zona));
+
+    private void SetCopy(string monitor, int zona, double? fraction)
+    {
+        if (fraction is double f) _copias[(monitor, zona)] = $"Copiando al otro equipo…  {EnviosRemotos.Porcentaje(f)}";
+        else _copias.Remove((monitor, zona));
+        foreach (MonitorTile t in _tiles)
+            if (t.Id == monitor) t.Invalidate();
     }
 
     private void KeepPanelInFront(bool wasActive)
@@ -1167,6 +1202,7 @@ internal sealed class MainForm : Form
         public string Id => _data.Id;
         public bool DropTarget { get; set; }
         public Bitmap? Preview { get; set; }
+        public Func<string, int, string?>? CopyText { get; set; }
 
         public event Action<MonitorTile, EstadoZona>? ZoneActivated;
         public event Action<MonitorTile>? MonitorMenuRequested;
@@ -1340,6 +1376,8 @@ internal sealed class MainForm : Form
                         g.DrawPath(pen, zp);
                     }
 
+                    string? copy = CopyText?.Invoke(_data.Id, s.Zona);
+                    if (copy is not null) pending = true;
                     if (s.Url is null && !pending)
                     {
                         string hint = hover ? "＋  Elegir contenido" : "＋";
@@ -1350,7 +1388,7 @@ internal sealed class MainForm : Form
 
                     string title = s.Titulo ?? "";
                     Color dot = pending ? Color.FromArgb(250, 204, 21) : Color.FromArgb(74, 222, 128);
-                    string txt = pending ? "Abriendo " + title : title;
+                    string txt = copy ?? (pending ? "Abriendo " + title : title);
                     int maxW = (int)zr.Width - 16;
                     int tw = Math.Min(maxW - 22, TextRenderer.MeasureText(txt, Theme.Small).Width);
                     if (maxW < 40) continue;

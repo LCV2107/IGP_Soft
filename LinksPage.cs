@@ -5,11 +5,13 @@ internal sealed class LinksPage : Page
     private readonly DataGridView _grid = new();
     private readonly Label _status = new();
     private bool _loading;
+    private readonly EnviosRemotos? _envios;
 
     public event Action? Changed;
 
-    public LinksPage() : base("Enlaces", "Lo que puede mostrarse en cada zona. Los cambios se guardan solos.")
+    public LinksPage(EnviosRemotos? envios = null) : base("Enlaces", "Lo que puede mostrarse en cada zona. Los cambios se guardan solos.")
     {
+        _envios = envios;
         _status.AutoSize = true;
         _status.Margin = new Padding(8, 10, 0, 0);
         _status.ForeColor = Theme.Success;
@@ -17,7 +19,7 @@ internal sealed class LinksPage : Page
         ModernButton delete = ToolButton("✕  Eliminar", DeleteRow);
         delete.Kind = ButtonKind.Danger;
         FlowLayoutPanel bar = ToolBar(
-            ToolButton("＋  Imagen o video de mi PC", AddFile, primary: true),
+            ToolButton(envios is null ? "＋  Imagen o video de mi PC" : "＋  Imagen, video o PDF de este equipo", () => _ = AddFile(), primary: true),
             ToolButton("↑  Subir", () => MoveRow(-1)),
             ToolButton("↓  Bajar", () => MoveRow(1)),
             delete,
@@ -43,7 +45,9 @@ internal sealed class LinksPage : Page
         var hint = new Label
         {
             Dock = DockStyle.Bottom, Height = 34, TextAlign = ContentAlignment.BottomLeft, ForeColor = Theme.TextMuted,
-            Text = "ⓘ  Las imágenes y videos de tu PC se copian a la carpeta Assets. El orden de la lista es el que usa «Abrir en orden».",
+            Text = envios is null
+                ? "ⓘ  Las imágenes y videos de tu PC se copian a la carpeta Assets. El orden de la lista es el que usa «Abrir en orden»."
+                : "ⓘ  Los archivos de este equipo se envían a la reserva del otro equipo. El orden de la lista es el que usa «Abrir en orden».",
         };
 
         var card = new Card { Dock = DockStyle.Fill, Padding = new Padding(10, 10, 10, 12) };
@@ -83,7 +87,7 @@ internal sealed class LinksPage : Page
             return;
         }
 
-        if (rows.Any(x => AssetStore.IsExternalFile(x.Link.Url)))
+        if (_envios is null && rows.Any(x => AssetStore.IsExternalFile(x.Link.Url)))
         {
             Cursor = Cursors.WaitCursor;
             try
@@ -111,20 +115,44 @@ internal sealed class LinksPage : Page
         Changed?.Invoke();
     }
 
-    private void AddFile()
+    private async Task AddFile()
     {
         using var d = new OpenFileDialog
         {
-            Title = "Elegir imágenes o videos",
+            Title = _envios is null ? "Elegir imágenes o videos" : "Elegir archivos para enviar al otro equipo",
             Multiselect = true,
-            Filter = "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
-                     "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
+            Filter = _envios is not null ? TiposPermitidos.Filtro
+                : "Imágenes y videos|*.jpg;*.jpeg;*.png;*.gif;*.webp;*.bmp;*.svg;*.avif;*.jfif;" +
+                  "*.mp4;*.webm;*.ogv;*.ogg;*.mov;*.m4v;*.mkv|Todos los archivos|*.*",
         };
         if (d.ShowDialog(this) != DialogResult.OK) return;
 
+        var added = new List<(string Titulo, string Url)>();
+        if (_envios is null) added.AddRange(d.FileNames.Select(f => (Path.GetFileNameWithoutExtension(f), f)));
+        else
+        {
+            var errores = new List<string>();
+            foreach (string file in d.FileNames)
+            {
+                _status.ForeColor = Theme.TextMuted;
+                _status.Text = $"Enviando «{Path.GetFileName(file)}»…";
+                (Resultado r, string? url) = await _envios.Enviar(file, f => _status.Text = $"Enviando «{Path.GetFileName(file)}»…  {EnviosRemotos.Porcentaje(f)}");
+                if (r.Ok && url is not null) added.Add((Path.GetFileNameWithoutExtension(file), url));
+                else if (r.Codigo == "cancelado") break;
+                else if (r.Mensaje is not null) errores.Add(r.Mensaje);
+            }
+            _status.Text = "";
+            if (errores.Count > 0)
+                MessageBox.Show(this, string.Join("\n\n", errores.Distinct()), "Enviar archivos", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (IsDisposed || added.Count == 0) return;
+        }
+
         _loading = true;
-        foreach (string file in d.FileNames)
-            _grid.Rows.Add(Path.GetFileNameWithoutExtension(file), file);
+        foreach ((string titulo, string url) in added)
+        {
+            int at = _grid.Rows.Count - (_grid.AllowUserToAddRows ? 1 : 0);
+            _grid.Rows.Insert(at, titulo, url);
+        }
         _loading = false;
         Save();
     }
