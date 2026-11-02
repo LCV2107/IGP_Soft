@@ -9,6 +9,7 @@ internal sealed class CustomElementForm : Form
     public string Titulo => _tituloBox.Box.Text.Trim();
     public string Target => _targetBox.Box.Text.Trim();
     public bool AddToList => _add.Checked;
+    public IReadOnlyList<string> Archivos { get; private set; } = Array.Empty<string>();
 
     private readonly string? _filtro;
 
@@ -46,7 +47,7 @@ internal sealed class CustomElementForm : Form
 
         FormClosing += (_, e) =>
         {
-            if (DialogResult == DialogResult.OK && Target.Length == 0)
+            if (DialogResult == DialogResult.OK && Target.Length == 0 && Archivos.Count < 2)
             {
                 MessageBox.Show(this, "Indica un archivo o una dirección web.", "Mostrar",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -59,10 +60,18 @@ internal sealed class CustomElementForm : Form
     {
         using var d = new OpenFileDialog
         {
-            Title = "Elegir imagen o video",
+            Title = "Elegir uno o varios archivos",
             Filter = _filtro ?? TiposPermitidos.Filtro + "|Todos los archivos|*.*",
+            Multiselect = true,
         };
         if (d.ShowDialog(this) != DialogResult.OK) return;
+        if (d.FileNames.Length > 1)
+        {
+            Archivos = d.FileNames;
+            DialogResult = DialogResult.OK;
+            Close();
+            return;
+        }
         _targetBox.Box.Text = d.FileName;
         if (_tituloBox.Box.Text.Trim().Length == 0)
             _tituloBox.Box.Text = Path.GetFileNameWithoutExtension(d.FileName);

@@ -34,6 +34,7 @@ internal sealed class MainForm : Form
     private readonly Panel _sideStatus = new();
     private readonly Panel _lock = new();
     private readonly Label _lockText = new();
+    private readonly Notificacion _notificacion = new();
     private readonly Chip _chipBrowser = new();
     private readonly Chip _chipMonitors = new();
     private readonly Chip _chipZones = new();
@@ -228,7 +229,7 @@ internal sealed class MainForm : Form
         var pages = new List<(string, string, Page)> { ("▦", "Pantallas", _screensPage), ("☰", "Enlaces", _linksPage) };
         if (!Remoto)
         {
-            _galleryPage = new GalleryPage(GalleryTargets);
+            _galleryPage = new GalleryPage(GalleryTargets, l => OrganizarEnMonitor(l, null));
             _exportPage = new ExportPage(() => { _local?.CloseAllWindows(); return true; }, AfterRestore);
             _settingsPage = new SettingsPage(_cboBrowser, _chkPreview, _chkSkipPrimary, () => ReloadAll(manual: true), RestartForUpdate);
             pages.Add(("▤", "Galería", _galleryPage));
@@ -240,7 +241,7 @@ internal sealed class MainForm : Form
         {
             if (_envios is not null)
             {
-                _remoteGallery = new GaleriaRemotaPage(_envios, GalleryTargets);
+                _remoteGallery = new GaleriaRemotaPage(_envios, GalleryTargets, l => OrganizarEnMonitor(l, null));
                 pages.Add(("▤", "Galería", _remoteGallery));
             }
             pages.Add(("★", "Perfiles", _profilesPage));
@@ -311,6 +312,8 @@ internal sealed class MainForm : Form
         Controls.Add(_lock);
         Controls.Add(_content);
         Controls.Add(side);
+        Controls.Add(_notificacion);
+        _notificacion.BringToFront();
         ShowPage(_screensPage);
     }
 
@@ -366,6 +369,7 @@ internal sealed class MainForm : Form
 
     private void AfterRestore()
     {
+        GaleriaCarpetas.Recargar();
         _local?.ReloadSettings();
         foreach (MonitorTile t in _tiles) t.Invalidate();
         UpdateInfo();
@@ -413,7 +417,18 @@ internal sealed class MainForm : Form
 
     private void ShowAviso(Resultado r)
     {
-        if (r.Mensaje is null) return;
+        if (r.Mensaje is null || _controlador is not null) return;
+        bool oculto = !Visible || WindowState == FormWindowState.Minimized;
+        if (r.Nivel != Nivel.Error && !oculto)
+        {
+            _notificacion.Mostrar(r.Titulo, r.Mensaje, r.Nivel);
+            return;
+        }
+        if (r.Nivel != Nivel.Error && _tray is not null)
+        {
+            _tray.ShowBalloonTip(5000, r.Titulo ?? "IGP_Soft", r.Mensaje, r.Nivel == Nivel.Aviso ? ToolTipIcon.Warning : ToolTipIcon.Info);
+            return;
+        }
         MessageBoxIcon icon = r.Nivel switch
         {
             Nivel.Error => MessageBoxIcon.Error,
@@ -557,11 +572,13 @@ internal sealed class MainForm : Form
     private void ExitApp()
     {
         if (!Visible) ShowFromTray();
-        if (_estado.HayAbierto && _local is not null)
+        if ((_estado.HayAbierto || _estado.HayBloqueados) && _local is not null)
         {
             DialogResult r = MessageBox.Show(this,
                 "Al salir se cerrarán las pantallas de monitoreo y su contenido " +
-                "(las ventanas adjuntas vuelven al escritorio, no se cierran). ¿Desea continuar?",
+                "(las ventanas adjuntas vuelven al escritorio, no se cierran)." +
+                (_estado.HayBloqueados ? "\n\nHay monitores bloqueados: los cambios que no se proyectaron se perderán." : "") +
+                " ¿Desea continuar?",
                 "Salir de IGP_Soft", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (r != DialogResult.OK) return;
             _local.CloseEverything();
@@ -582,6 +599,10 @@ internal sealed class MainForm : Form
             tile.ZoneActivated += ShowSegmentMenu;
             tile.MonitorMenuRequested += ShowMonitorMenu;
             tile.GridRequested += ShowGridPicker;
+            tile.LockToggled += v => _ = _p.Bloquear(v.Data.Id, !v.Data.Bloqueado);
+            tile.AllowDrop = true;
+            tile.DragEnter += (_, e) => e.Effect = _controlador is null && ArchivosSoltados(e).Count > 0 ? DragDropEffects.Copy : DragDropEffects.None;
+            tile.DragDrop += (s, e) => SoltarArchivos((MonitorTile)s!, e);
             tile.DragMoved += OnTileDragMoved;
             tile.DragDropped += OnTileDropped;
             _tiles.Add(tile);
@@ -639,21 +660,6 @@ internal sealed class MainForm : Form
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
         _ = _p.Separar(m.Id);
-    }
-
-    private void AddMonitorItems(ContextMenuStrip menu, EstadoMonitor m)
-    {
-        var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => _ = _p.CerrarMonitor(m.Id))
-        {
-            Enabled = m.Zonas.Any(z => z.Ocupada),
-        };
-        Keys k = Hotkeys.Get(Hotkeys.Actions.First(a => a.Key == "cerrarmonitor"));
-        if (k != Keys.None && !Remoto) close.ShortcutKeyDisplayString = Hotkeys.Format(k);
-        menu.Items.Add(close);
-        if (m.Combinado)
-            menu.Items.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(m)));
-        if (_estado.NumeracionPropia)
-            menu.Items.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _ = _p.NumeracionOriginal()));
     }
 
     private void UpdateInfo()
@@ -925,6 +931,12 @@ internal sealed class MainForm : Form
             case "cerrarmonitor":
                 if (under is not null) _ = _p.CerrarMonitor(under.Id);
                 break;
+            case "bloquear":
+                if (under is not null) _ = _p.Bloquear(under.Id, !under.Bloqueado);
+                break;
+            case "bloqueartodos":
+                _ = _p.Bloquear(null, !_estado.TodosBloqueados);
+                break;
         }
     }
 
@@ -964,7 +976,26 @@ internal sealed class MainForm : Form
         menu.Items.Add(new ToolStripLabel($"Monitor {m.Numero}{label}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
 
-        if (!zona.Desactivada && usable > 1)
+        if (zona.Desactivada)
+        {
+            menu.Items.Add(new ToolStripMenuItem("✓  Usar esta zona", null, (_, _) => ToggleZone(m, zona)));
+            menu.Items.Add(new ToolStripMenuItem("▦  Diseñar grilla de este monitor…", null, (_, _) => EditLayout(m)));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(MonitorSubmenu(m));
+            menu.Show(Cursor.Position);
+            return;
+        }
+
+        if (zona.Estado is EstadosZona.EnPantalla or EstadosZona.Abriendo or EstadosZona.Borrador)
+        {
+            menu.Items.Add(new ToolStripMenuItem(
+                abriendo ? "✖  Cancelar apertura"
+                : zona.Estado == EstadosZona.Borrador ? "✖  Quitar de esta zona"
+                : zona.Adjunta ? "↩  Soltar ventana (devolverla al escritorio)"
+                : "✖  Cerrar esta ventana", null, (_, _) => _ = _p.Cerrar(m.Id, zona.Zona)));
+        }
+
+        if (usable > 1 && !m.Bloqueado)
         {
             ToolStripMenuItem ampliar = m.Ampliada == zona.Zona
                 ? new ToolStripMenuItem("⤡  Volver a la grilla", null, (_, _) => _ = _p.Restaurar(m.Id))
@@ -973,66 +1004,129 @@ internal sealed class MainForm : Form
             if (Hotkeys.Get(act) != Keys.None && !Remoto) ampliar.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(act));
             menu.Items.Add(ampliar);
         }
+        if (menu.Items.Count > 2) menu.Items.Add(new ToolStripSeparator());
 
-        var disenar = new ToolStripMenuItem("▦  Diseñar grilla de este monitor…");
-        disenar.Click += (_, _) => EditLayout(m);
-        menu.Items.Add(disenar);
-
-        if (zona.Desactivada)
-        {
-            var usar = new ToolStripMenuItem("✓  Usar esta zona");
-            usar.Click += (_, _) => ToggleZone(m, zona);
-            menu.Items.Add(usar);
-            menu.Show(Cursor.Position);
-            return;
-        }
-
-        if (m.Zonas.Count > 1)
-        {
-            var noUsar = new ToolStripMenuItem("⊘  No usar esta zona") { Enabled = usable > 1 };
-            noUsar.Click += (_, _) => ToggleZone(m, zona);
-            menu.Items.Add(noUsar);
-        }
-
-        var omitir = new ToolStripMenuItem("Omitir esta pantalla");
-        omitir.Click += (_, _) => _ = _p.AlternarOmitir(m.Id);
-        menu.Items.Add(omitir);
-        AddMonitorItems(menu, m);
+        menu.Items.Add(LinksSubmenu(m, zona, abriendo));
+        var agregar = new ToolStripMenuItem("➕  Agregar") { Enabled = !abriendo };
+        agregar.DropDownItems.Add(new ToolStripMenuItem("Archivo o URL…", null, (_, _) => AddCustomElement(m, zona)));
+        agregar.DropDownItems.Add(new ToolStripMenuItem("Varios archivos (repartir en el monitor)…", null, (_, _) => ElegirVarios(m)));
+        agregar.DropDownItems.Add(BuildAttachMenu(m, zona, ventanas, abriendo));
+        menu.Items.Add(agregar);
+        if (zona.Web) menu.Items.Add(PestanasSubmenu(m, zona));
         menu.Items.Add(new ToolStripSeparator());
 
-        if (zona.Estado is EstadosZona.EnPantalla or EstadosZona.Abriendo)
-        {
-            var cerrar = new ToolStripMenuItem(
-                abriendo ? "✖  Cancelar apertura"
-                : zona.Adjunta ? "↩  Soltar ventana (devolverla al escritorio)"
-                : "✖  Cerrar esta ventana");
-            cerrar.Click += (_, _) => _ = _p.Cerrar(m.Id, zona.Zona);
-            menu.Items.Add(cerrar);
-            menu.Items.Add(new ToolStripSeparator());
-        }
+        var zonaMenu = new ToolStripMenuItem("▢  Zona");
+        if (m.Zonas.Count > 1)
+            zonaMenu.DropDownItems.Add(new ToolStripMenuItem("⊘  No usar esta zona", null, (_, _) => ToggleZone(m, zona)) { Enabled = usable > 1 });
+        zonaMenu.DropDownItems.Add(new ToolStripMenuItem("▦  Diseñar grilla de este monitor…", null, (_, _) => EditLayout(m)));
+        menu.Items.Add(zonaMenu);
+        menu.Items.Add(MonitorSubmenu(m));
 
-        foreach (LinkDef link in LinkStore.Links)
+        menu.Show(Cursor.Position);
+    }
+
+    private ToolStripMenuItem PestanasSubmenu(EstadoMonitor m, EstadoZona zona)
+    {
+        var sub = new ToolStripMenuItem("▤  Pestañas");
+        IReadOnlyList<LinkDef> tabs = zona.Pestanas ?? new[] { new LinkDef(zona.Titulo ?? "", zona.Url ?? "") };
+        for (int i = 0; i < tabs.Count; i++)
+        {
+            int indice = i;
+            sub.DropDownItems.Add(new ToolStripMenuItem(tabs[i].Titulo.Replace("&", "&&"), null, (_, _) => _ = _p.ActivarPestana(m.Id, zona.Zona, indice))
+            {
+                Checked = i == zona.Activa,
+            });
+        }
+        sub.DropDownItems.Add(new ToolStripSeparator());
+        sub.DropDownItems.Add(new ToolStripMenuItem(tabs.Count < PestanasWeb.Maximo ? "＋  Nueva pestaña…" : $"Máximo {PestanasWeb.Maximo} pestañas", null,
+            (_, _) => NuevaPestana(m, zona)) { Enabled = tabs.Count < PestanasWeb.Maximo });
+        if (tabs.Count > 1)
+            sub.DropDownItems.Add(new ToolStripMenuItem("✕  Cerrar la pestaña visible", null, (_, _) => _ = _p.CerrarPestana(m.Id, zona.Zona, zona.Activa)));
+        return sub;
+    }
+
+    private void NuevaPestana(EstadoMonitor m, EstadoZona zona)
+    {
+        using var f = new NuevaPestanaForm(LinkStore.Links);
+        if (f.ShowDialog(this) != DialogResult.OK || f.Resultado is not { } link) return;
+        RememberPanelFocus();
+        _ = _p.AbrirPestana(m.Id, zona.Zona, link);
+    }
+
+    private ToolStripMenuItem LinksSubmenu(EstadoMonitor m, EstadoZona zona, bool abriendo)
+    {
+        var abrir = new ToolStripMenuItem("☰  Abrir enlace") { Enabled = !abriendo };
+        List<LinkDef> links = LinkStore.Links.ToList();
+        bool agrupar = links.Count > 15;
+        var grupos = new Dictionary<string, ToolStripMenuItem>();
+        foreach (LinkDef link in links)
         {
             bool aqui = string.Equals(zona.Url, link.Url, StringComparison.Ordinal);
             bool enOtro = _estado.EstaAbierto(link.Url) && !aqui;
-            var item = new ToolStripMenuItem((aqui ? "" : "Abrir: ") + link.Titulo)
+            var item = new ToolStripMenuItem(link.Titulo.Replace("&", "&&"))
             {
                 Checked = aqui,
-                Enabled = !enOtro && !aqui && !abriendo,
+                Enabled = !enOtro && !aqui,
             };
             if (enOtro) item.Text += "   (ya abierto)";
             LinkDef captured = link;
             item.Click += (_, _) => Open(m.Id, zona.Zona, captured);
-            menu.Items.Add(item);
+            if (!agrupar) { abrir.DropDownItems.Add(item); continue; }
+            string grupo = GrupoDe(link.Url);
+            if (!grupos.TryGetValue(grupo, out ToolStripMenuItem? g))
+                grupos[grupo] = g = new ToolStripMenuItem(grupo);
+            g.DropDownItems.Add(item);
         }
+        foreach (string nombre in new[] { "Páginas web", "Imágenes", "Videos", "Documentos", "Ventanas", "Otros" })
+            if (grupos.TryGetValue(nombre, out ToolStripMenuItem? g))
+            {
+                g.Text += $"   ({g.DropDownItems.Count})";
+                abrir.DropDownItems.Add(g);
+            }
+        if (abrir.DropDownItems.Count == 0)
+            abrir.DropDownItems.Add(new ToolStripMenuItem("(no hay enlaces en la lista)") { Enabled = false });
+        return abrir;
+    }
 
-        menu.Items.Add(new ToolStripSeparator());
-        var custom = new ToolStripMenuItem("➕  Elemento personalizado (archivo o URL)…") { Enabled = !abriendo };
-        custom.Click += (_, _) => AddCustomElement(m, zona);
-        menu.Items.Add(custom);
-        menu.Items.Add(BuildAttachMenu(m, zona, ventanas, abriendo));
+    private static string GrupoDe(string url)
+    {
+        if (WindowManager.IsWindowSpec(url)) return "Ventanas";
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return "Páginas web";
+        if (Documentos.Nombre(url) is not null) return "Documentos";
+        return Thumbnails.KindOf(url) switch
+        {
+            MediaKind.Image => "Imágenes",
+            MediaKind.Video => "Videos",
+            _ => "Otros",
+        };
+    }
 
-        menu.Show(Cursor.Position);
+    private ToolStripMenuItem MonitorSubmenu(EstadoMonitor m)
+    {
+        var sub = new ToolStripMenuItem("🖥  Monitor");
+        var bloquear = new ToolStripMenuItem(m.Bloqueado ? "🔓  Desbloquear y proyectar" : "🔒  Bloquear proyección", null,
+            (_, _) => _ = _p.Bloquear(m.Id, !m.Bloqueado));
+        HotkeyAction accion = Hotkeys.Actions.First(a => a.Key == "bloquear");
+        if (Hotkeys.Get(accion) != Keys.None && !Remoto) bloquear.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(accion));
+        sub.DropDownItems.Add(bloquear);
+        sub.DropDownItems.Add(new ToolStripMenuItem(_estado.TodosBloqueados ? "🔓  Desbloquear todos los monitores" : "🔒  Bloquear todos los monitores", null,
+            (_, _) => _ = _p.Bloquear(null, !_estado.TodosBloqueados)));
+        if (_estado.HayBloqueados && !_estado.TodosBloqueados)
+            sub.DropDownItems.Add(new ToolStripMenuItem("🔓  Desbloquear todos los monitores", null, (_, _) => _ = _p.Bloquear(null, false)));
+        sub.DropDownItems.Add(new ToolStripSeparator());
+        sub.DropDownItems.Add(new ToolStripMenuItem("Omitir esta pantalla", null, (_, _) => _ = _p.AlternarOmitir(m.Id)));
+        var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => _ = _p.CerrarMonitor(m.Id))
+        {
+            Enabled = m.Zonas.Any(z => z.Ocupada),
+        };
+        Keys k = Hotkeys.Get(Hotkeys.Actions.First(a => a.Key == "cerrarmonitor"));
+        if (k != Keys.None && !Remoto) close.ShortcutKeyDisplayString = Hotkeys.Format(k);
+        sub.DropDownItems.Add(close);
+        if (m.Combinado)
+            sub.DropDownItems.Add(new ToolStripMenuItem("⊟  Separar monitores combinados", null, (_, _) => SeparateMonitors(m)));
+        if (_estado.NumeracionPropia)
+            sub.DropDownItems.Add(new ToolStripMenuItem("↺  Restablecer numeración de monitores", null, (_, _) => _ = _p.NumeracionOriginal()));
+        return sub;
     }
 
     private ToolStripMenuItem BuildAttachMenu(EstadoMonitor m, EstadoZona zona, List<VentanaAbierta> ventanas, bool abriendo)
@@ -1062,9 +1156,18 @@ internal sealed class MainForm : Form
         using (var d = new CustomElementForm(m.Numero, Remoto ? TiposPermitidos.Filtro : null))
         {
             if (d.ShowDialog(this) != DialogResult.OK) return;
+            if (d.Archivos.Count > 1)
+            {
+                OrganizarEnMonitor(d.Archivos.Select(Repartos.Elemento).ToList(), m.Id);
+                return;
+            }
             (titulo, target, addToList) = (d.Titulo, d.Target, d.AddToList);
         }
+        await MostrarEn(m, zona, titulo, target, addToList);
+    }
 
+    private async Task MostrarEn(EstadoMonitor m, EstadoZona zona, string titulo, string target, bool addToList)
+    {
         if (AssetStore.IsExternalFile(target))
         {
             if (Remoto)
@@ -1097,6 +1200,95 @@ internal sealed class MainForm : Form
     }
 
     private string? CopyText(string monitor, int zona) => _copias.GetValueOrDefault((monitor, zona));
+
+    private List<string> ArchivosSoltados(DragEventArgs e) =>
+        e.Data?.GetData(DataFormats.FileDrop) is string[] files
+            ? files.Where(f => File.Exists(f) && TiposPermitidos.Extension(f)).ToList()
+            : new List<string>();
+
+    private async void SoltarArchivos(MonitorTile tile, DragEventArgs e)
+    {
+        List<string> files = ArchivosSoltados(e);
+        if (files.Count == 0 || _controlador is not null || tile.Data.Omitido) return;
+        if (files.Count == 1 && tile.ZonaEn(new Point(e.X, e.Y)) is { Desactivada: false } zona)
+        {
+            await MostrarEn(tile.Data, zona, Path.GetFileNameWithoutExtension(files[0]), files[0], addToList: true);
+            return;
+        }
+        BeginInvoke(() => OrganizarEnMonitor(files.Select(Repartos.Elemento).ToList(), tile.Id));
+    }
+
+    private void ElegirVarios(EstadoMonitor m)
+    {
+        using var d = new OpenFileDialog
+        {
+            Title = "Elegir los archivos para el monitor " + m.Numero,
+            Multiselect = true,
+            Filter = TiposPermitidos.Filtro + (Remoto ? "" : "|Todos los archivos|*.*"),
+        };
+        if (d.ShowDialog(this) != DialogResult.OK) return;
+        OrganizarEnMonitor(d.FileNames.Select(Repartos.Elemento).ToList(), m.Id);
+    }
+
+    public void OrganizarEnMonitor(IReadOnlyList<LinkDef> elementos, string? monitor)
+    {
+        if (elementos.Count == 0 || _controlador is not null) return;
+        if (_estado.Monitores.All(m => m.Omitido))
+        {
+            ShowAviso(new Resultado(false, "sin_zonas", "Organizar", "No hay monitores disponibles (todos están omitidos).", Nivel.Aviso));
+            return;
+        }
+        using var f = new RepartoForm(elementos, _estado.Monitores, monitor);
+        if (f.ShowDialog(this) != DialogResult.OK || f.Resultado is not { } r) return;
+        _ = AplicarReparto(r);
+    }
+
+    private async Task AplicarReparto(Reparto r)
+    {
+        if (_estado.Monitor(r.Monitor) is not { } m) return;
+        var listos = new List<(int Zona, LinkDef Link)>();
+        var errores = new List<string>();
+        foreach ((int zona, LinkDef elemento) in r.Asignaciones)
+        {
+            string target = elemento.Url;
+            if (AssetStore.IsExternalFile(target))
+            {
+                if (Remoto)
+                {
+                    if (_envios is null) return;
+                    SetCopy(r.Monitor, zona, 0);
+                    (Resultado R, string? Url) sent;
+                    try { sent = await _envios.Enviar(target, f => SetCopy(r.Monitor, zona, f)); }
+                    finally { SetCopy(r.Monitor, zona, null); }
+                    if (!sent.R.Ok || sent.Url is null)
+                    {
+                        if (sent.R.Mensaje is not null) errores.Add(sent.R.Mensaje);
+                        continue;
+                    }
+                    target = sent.Url;
+                }
+                else
+                {
+                    UseWaitCursor = true;
+                    try { target = await Task.Run(() => AssetStore.Import(target)); }
+                    catch (Exception ex) { errores.Add($"{Path.GetFileName(target)}: {ex.Message}"); continue; }
+                    finally { UseWaitCursor = false; }
+                }
+            }
+            var link = new LinkDef(elemento.Titulo, target);
+            listos.Add((zona, r.AgregarALista ? LinkStore.Add(link) : link));
+        }
+        if (errores.Count > 0)
+            ShowAviso(new Resultado(false, "reparto", "Organizar", string.Join("\n\n", errores.Distinct()), Nivel.Aviso));
+        if (IsDisposed) return;
+
+        RememberPanelFocus();
+        bool bloquear = !m.Bloqueado;
+        if (bloquear && !(await _p.Bloquear(r.Monitor, true)).Ok) bloquear = false;
+        if (!m.Layout().SameAs(r.Grilla)) await _p.CambiarGrilla(r.Monitor, r.Grilla);
+        foreach ((int zona, LinkDef link) in listos) await _p.Abrir(r.Monitor, zona, link);
+        if (bloquear) await _p.Bloquear(r.Monitor, false);
+    }
 
     private void SetCopy(string monitor, int zona, double? fraction)
     {
@@ -1207,6 +1399,7 @@ internal sealed class MainForm : Form
         public event Action<MonitorTile, EstadoZona>? ZoneActivated;
         public event Action<MonitorTile>? MonitorMenuRequested;
         public event Action<MonitorTile, Point>? GridRequested;
+        public event Action<MonitorTile>? LockToggled;
         public event Action<MonitorTile, Point>? DragMoved;
         public event Action<MonitorTile, Point>? DragDropped;
 
@@ -1216,6 +1409,8 @@ internal sealed class MainForm : Form
         private bool _suppressClick;
         private bool _hover;
         private bool _hoverCtrl;
+        private bool _hoverLock;
+        private Rectangle _lockRect;
         private int? _hoverZone;
         private Rectangle _ctrlRect;
 
@@ -1227,13 +1422,15 @@ internal sealed class MainForm : Form
             Cursor = Cursors.Hand;
             BackColor = Theme.Background;
             MouseEnter += (_, _) => { _hover = true; Invalidate(); };
-            MouseLeave += (_, _) => { _hover = false; _hoverZone = null; _hoverCtrl = false; Invalidate(); };
+            MouseLeave += (_, _) => { _hover = false; _hoverZone = null; _hoverCtrl = false; _hoverLock = false; Invalidate(); };
         }
 
         private RectangleF RectOf(EstadoZona z) =>
             z.Zona < _grid.Zones.Count ? _grid.AreaOf(_grid.Zones[z.Zona], new SizeF(Width, Height)) : RectangleF.Empty;
 
         private EstadoZona? ZoneAt(Point p) => _data.Zonas.FirstOrDefault(z => RectOf(z).Contains(p));
+
+        public EstadoZona? ZonaEn(Point screen) => _data.Omitido ? null : ZoneAt(PointToClient(screen));
 
         protected override void Dispose(bool disposing)
         {
@@ -1244,7 +1441,7 @@ internal sealed class MainForm : Form
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left || _ctrlRect.Contains(e.Location)) return;
+            if (e.Button != MouseButtons.Left || _ctrlRect.Contains(e.Location) || _lockRect.Contains(e.Location)) return;
             _downAt = e.Location;
             _pressed = true;
             _dragging = false;
@@ -1269,6 +1466,12 @@ internal sealed class MainForm : Form
         {
             base.OnMouseClick(e);
             if (_suppressClick) { _suppressClick = false; return; }
+
+            if (!_data.Omitido && _lockRect.Contains(e.Location))
+            {
+                LockToggled?.Invoke(this);
+                return;
+            }
 
             if (!_data.Omitido && _ctrlRect.Contains(e.Location))
             {
@@ -1297,11 +1500,13 @@ internal sealed class MainForm : Form
                 DragMoved?.Invoke(this, PointToScreen(e.Location));
                 return;
             }
-            int? over = _data.Omitido || _ctrlRect.Contains(e.Location) ? null : ZoneAt(e.Location)?.Zona;
             bool onCtrl = !_data.Omitido && _ctrlRect.Contains(e.Location);
-            if (over == _hoverZone && onCtrl == _hoverCtrl) return;
+            bool onLock = !_data.Omitido && _lockRect.Contains(e.Location);
+            int? over = _data.Omitido || onCtrl || onLock ? null : ZoneAt(e.Location)?.Zona;
+            if (over == _hoverZone && onCtrl == _hoverCtrl && onLock == _hoverLock) return;
             _hoverZone = over;
             _hoverCtrl = onCtrl;
+            _hoverLock = onLock;
             Invalidate();
         }
 
@@ -1314,6 +1519,7 @@ internal sealed class MainForm : Form
             bool excluded = _data.Omitido;
             bool preview = Preview is not null && !excluded;
             bool live = _data.Zonas.Any(z => z.Estado == EstadosZona.EnPantalla);
+            bool locked = _data.Bloqueado;
             var card = new RectangleF(3, 2, Width - 7, Height - 8);
             Theme.Shadow(g, card, 14, _hover ? 6 : 4);
             using var clip = Theme.Round(card, 14);
@@ -1325,6 +1531,8 @@ internal sealed class MainForm : Form
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
                 g.DrawImage(Preview!, card);
             }
+            if (locked && !excluded)
+                using (var veil = new SolidBrush(Color.FromArgb(preview ? 150 : 60, 15, 23, 42))) g.FillRectangle(veil, card);
 
             if (!excluded)
             {
@@ -1364,6 +1572,7 @@ internal sealed class MainForm : Form
                     }
 
                     bool pending = s.Estado == EstadosZona.Abriendo;
+                    bool draft = s.Estado == EstadosZona.Borrador;
                     Color fill = hover ? Color.FromArgb(preview ? 90 : 120, 37, 99, 235)
                                : s.Url is not null ? Color.FromArgb(preview ? 0 : 60, 37, 99, 235)
                                : Color.FromArgb(preview ? 40 : 18, 255, 255, 255);
@@ -1386,8 +1595,8 @@ internal sealed class MainForm : Form
                         continue;
                     }
 
-                    string title = s.Titulo ?? "";
-                    Color dot = pending ? Color.FromArgb(250, 204, 21) : Color.FromArgb(74, 222, 128);
+                    string title = (s.Titulo ?? "") + (s.CantidadPestanas > 1 ? $"  ·  {s.CantidadPestanas} pestañas" : "");
+                    Color dot = pending ? Color.FromArgb(250, 204, 21) : draft ? Color.FromArgb(251, 146, 60) : Color.FromArgb(74, 222, 128);
                     string txt = copy ?? (pending ? "Abriendo " + title : title);
                     int maxW = (int)zr.Width - 16;
                     int tw = Math.Min(maxW - 22, TextRenderer.MeasureText(txt, Theme.Small).Width);
@@ -1410,18 +1619,40 @@ internal sealed class MainForm : Form
                 TextRenderer.DrawText(g, msg, Theme.Section, Rectangle.Round(card), _dragging ? Theme.Text : Color.White, C);
             }
 
-            Color border = DropTarget ? Color.FromArgb(147, 197, 253) : excluded ? Theme.BorderStrong : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
-            using (var bp = new Pen(border, DropTarget ? 3f : _hover || live ? 2f : 1f))
+            Color border = DropTarget ? Color.FromArgb(147, 197, 253) : excluded ? Theme.BorderStrong : locked ? Color.FromArgb(245, 158, 11)
+                         : _hover ? Theme.Accent : live ? Theme.Success : Color.FromArgb(51, 65, 85);
+            using (var bp = new Pen(border, DropTarget || locked ? 3f : _hover || live ? 2f : 1f))
             {
                 if (excluded) bp.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                 g.DrawPath(bp, clip);
             }
 
+            float tagX = card.X + 10;
+            if (!excluded)
+            {
+                _lockRect = new Rectangle((int)tagX, (int)card.Y + 10, 30, 24);
+                Color lockFill = locked ? Color.FromArgb(245, 158, 11) : _hoverLock ? Theme.Accent : Color.FromArgb(215, 15, 23, 42);
+                Theme.FillRound(g, _hoverLock && locked ? Color.FromArgb(217, 119, 6) : lockFill, _lockRect, 12);
+                TextRenderer.DrawText(g, locked ? "🔒" : "🔓", Theme.Small, _lockRect, locked ? Color.FromArgb(66, 32, 6) : Color.White, C);
+                tagX = _lockRect.Right + 6;
+            }
+            else _lockRect = Rectangle.Empty;
+
             string name = $"Monitor {_data.Numero}" + (_data.Combinado ? $" · Combinado ({_data.Miembros})" : _data.Principal ? " · Principal" : "");
             int nw = TextRenderer.MeasureText(name, Theme.SmallBold).Width + 20;
-            var tag = new RectangleF(card.X + 10, card.Y + 10, nw, 24);
+            var tag = new RectangleF(tagX, card.Y + 10, nw, 24);
             Theme.FillRound(g, excluded ? Color.FromArgb(203, 213, 225) : Color.FromArgb(215, 15, 23, 42), tag, 12);
             TextRenderer.DrawText(g, name, Theme.SmallBold, Rectangle.Round(tag), excluded ? Theme.TextMuted : Color.White, C);
+            if (locked && !excluded)
+            {
+                const string aviso = "Sin proyectar";
+                var badge = new RectangleF(tag.Right + 6, tag.Y, TextRenderer.MeasureText(aviso, Theme.SmallBold).Width + 20, 24);
+                if (badge.Right < card.Right - 120)
+                {
+                    Theme.FillRound(g, Color.FromArgb(245, 158, 11), badge, 12);
+                    TextRenderer.DrawText(g, aviso, Theme.SmallBold, Rectangle.Round(badge), Color.FromArgb(66, 32, 6), C);
+                }
+            }
 
             if (!excluded)
             {

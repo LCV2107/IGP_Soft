@@ -56,6 +56,7 @@ internal sealed class GaleriaRemotaPage : Page
 
     private readonly EnviosRemotos _envios;
     private readonly Func<IReadOnlyList<GalleryTarget>> _targets;
+    private readonly Action<IReadOnlyList<LinkDef>> _organizar;
     private readonly ListView _list = new();
     private readonly ImageList _images = new() { ImageSize = ThumbSize, ColorDepth = ColorDepth.Depth32Bit };
     private readonly ComboBox _filter = new();
@@ -65,7 +66,8 @@ internal sealed class GaleriaRemotaPage : Page
     private readonly PictureBox _preview = new();
     private readonly Label _name = new();
     private readonly Label _details = new();
-    private readonly ModernButton _btnOpenIn = new("Mostrar en una zona", ButtonKind.Primary, "▶");
+    private readonly ModernButton _btnOrganizar = new("Organizar en un monitor…", ButtonKind.Primary, "▦");
+    private readonly ModernButton _btnOpenIn = new("Mostrar en una zona", ButtonKind.Secondary, "▶");
     private readonly ModernButton _btnAddToList = new("Agregar a la lista de enlaces", ButtonKind.Secondary, "☰");
     private readonly ModernButton _btnDelete = new("Eliminar de la reserva", ButtonKind.Danger, "✕");
     private readonly Panel _progressBar = new();
@@ -77,11 +79,12 @@ internal sealed class GaleriaRemotaPage : Page
     private CancellationTokenSource? _thumbsCts;
     private int _previewSeq;
 
-    public GaleriaRemotaPage(EnviosRemotos envios, Func<IReadOnlyList<GalleryTarget>> targets)
+    public GaleriaRemotaPage(EnviosRemotos envios, Func<IReadOnlyList<GalleryTarget>> targets, Action<IReadOnlyList<LinkDef>> organizar)
         : base("Galería", "Imágenes, videos y documentos del otro equipo. Arrastra archivos de este equipo aquí para enviarlos a su reserva.")
     {
         _envios = envios;
         _targets = targets;
+        _organizar = organizar;
         AllowDrop = true;
 
         ModernButton btnSend = ToolButton("＋  Enviar a la reserva…", () => { }, primary: true);
@@ -121,12 +124,16 @@ internal sealed class GaleriaRemotaPage : Page
         _list.Dock = DockStyle.Fill;
         _list.View = View.LargeIcon;
         _list.LargeImageList = _images;
-        _list.MultiSelect = false;
+        _list.MultiSelect = true;
         _list.HideSelection = false;
         _list.BorderStyle = BorderStyle.None;
         _list.BackColor = Theme.Surface;
         _list.Font = Theme.Small;
         _list.SelectedIndexChanged += (_, _) => ShowSelected();
+        _list.KeyDown += (_, e) =>
+        {
+            if (e.Control && e.KeyCode == Keys.A) { foreach (ListViewItem i in _list.Items) i.Selected = true; }
+        };
 
         var right = new Card { Dock = DockStyle.Right, Width = 340, Padding = new Padding(16) };
         _preview.Dock = DockStyle.Top;
@@ -147,16 +154,17 @@ internal sealed class GaleriaRemotaPage : Page
         _details.Font = Theme.Small;
 
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 6, 0, 0), BackColor = Theme.Surface };
-        foreach (ModernButton b in new[] { _btnOpenIn, _btnAddToList, _btnDelete })
+        foreach (ModernButton b in new[] { _btnOrganizar, _btnOpenIn, _btnAddToList, _btnDelete })
         {
             b.Size = new Size(304, 38);
             b.Margin = new Padding(0, 0, 0, 6);
             b.TextAlign = ContentAlignment.MiddleLeft;
         }
+        _btnOrganizar.Click += (_, _) => { if (SelectedFiles.Count > 0) _organizar(SelectedFiles.Select(LinkFor).ToList()); };
         _btnOpenIn.Click += (_, _) => ShowTargets();
         _btnAddToList.Click += (_, _) => AddToList();
         _btnDelete.Click += async (_, _) => await DeleteSelected();
-        actions.Controls.AddRange(new Control[] { _btnOpenIn, _btnAddToList, _btnDelete });
+        actions.Controls.AddRange(new Control[] { _btnOrganizar, _btnOpenIn, _btnAddToList, _btnDelete });
 
         right.Controls.Add(actions);
         right.Controls.Add(_details);
@@ -166,7 +174,7 @@ internal sealed class GaleriaRemotaPage : Page
         var hint = new Label
         {
             Dock = DockStyle.Bottom, Height = 32, TextAlign = ContentAlignment.BottomLeft, ForeColor = Theme.TextMuted,
-            Text = "ⓘ  Cada archivo se envía una sola vez: si el otro equipo ya lo tiene, se usa al instante. Los programas no se pueden enviar.",
+            Text = "ⓘ  Ctrl o Mayús para elegir varios. Cada archivo se envía una sola vez: si el otro equipo ya lo tiene, se usa al instante.",
         };
 
         var listCard = new Card { Dock = DockStyle.Fill, Padding = new Padding(12) };
@@ -197,7 +205,9 @@ internal sealed class GaleriaRemotaPage : Page
 
     public override void OnPageShown() => _ = Reload();
 
-    private ArchivoRemoto? Selected => _list.SelectedItems.Count > 0 ? _list.SelectedItems[0].Tag as ArchivoRemoto : null;
+    private ArchivoRemoto? Selected => _list.SelectedItems.Count == 1 ? _list.SelectedItems[0].Tag as ArchivoRemoto : null;
+
+    private List<ArchivoRemoto> SelectedFiles => _list.SelectedItems.Cast<ListViewItem>().Select(i => (ArchivoRemoto)i.Tag!).ToList();
 
     private void OnProgress(string nombre, double f)
     {
@@ -300,16 +310,35 @@ internal sealed class GaleriaRemotaPage : Page
     private async void ShowSelected()
     {
         ArchivoRemoto? f = Selected;
+        List<ArchivoRemoto> sel = SelectedFiles;
         int seq = ++_previewSeq;
         Image? old = _preview.Image;
         _preview.Image = null;
         old?.Dispose();
         foreach (Button b in new[] { _btnOpenIn, _btnAddToList, _btnDelete }) b.Enabled = f is not null;
+        _btnOrganizar.Enabled = sel.Count > 0 && _targets().Count > 0;
 
-        if (f is null)
+        if (sel.Count == 0)
         {
             _name.Text = "";
             _details.Text = "Envía imágenes, videos, PDF, Word o PowerPoint con «＋ Enviar a la reserva…» o arrastrándolos aquí.";
+            return;
+        }
+
+        if (f is null)
+        {
+            int fuera = sel.Count(x => !LinkStore.Links.Any(l => SameUrl(l.Url, x.Url)));
+            int recibidos = sel.Count(x => x.Reserva);
+            _name.Text = $"{sel.Count} elementos seleccionados";
+            _details.Text = $"{FormatSize(sel.Sum(x => x.Bytes))} en total\n" +
+                            (fuera > 0 ? $"{fuera} no están en la lista de enlaces" : "Todos están en la lista de enlaces") + "\n" +
+                            "Usa «Organizar en un monitor…» para repartirlos en sus zonas.";
+            _btnAddToList.Enabled = fuera > 0;
+            _btnAddToList.Text = fuera > 0 ? $"Agregar {fuera} a la lista de enlaces" : "Ya están en la lista de enlaces";
+            _btnAddToList.Invalidate();
+            _btnDelete.Enabled = recibidos > 0;
+            _btnDelete.Text = recibidos > 0 ? $"Eliminar {recibidos} recibido(s) de la reserva" : "Solo se eliminan los recibidos";
+            _btnDelete.Invalidate();
             return;
         }
 
@@ -361,8 +390,9 @@ internal sealed class GaleriaRemotaPage : Page
 
     private void AddToList()
     {
-        if (Selected is not { } f) return;
-        LinkStore.Add(new LinkDef(Path.GetFileNameWithoutExtension(f.Nombre), f.Url));
+        foreach (ArchivoRemoto f in SelectedFiles)
+            if (!LinkStore.Links.Any(l => SameUrl(l.Url, f.Url)))
+                LinkStore.Add(new LinkDef(Path.GetFileNameWithoutExtension(f.Nombre), f.Url));
         _btnAddToList.Enabled = false;
         _btnAddToList.Text = "Ya está en la lista de enlaces";
         _btnAddToList.Invalidate();
@@ -370,14 +400,21 @@ internal sealed class GaleriaRemotaPage : Page
 
     private async Task DeleteSelected()
     {
-        if (Selected is not { Reserva: true } f) return;
-        if (MessageBox.Show(this, $"¿Eliminar «{f.Nombre}» de la reserva del otro equipo?\n\nSi lo necesitas otra vez, habrá que volver a enviarlo.",
+        List<ArchivoRemoto> borrar = SelectedFiles.Where(x => x.Reserva).ToList();
+        if (borrar.Count == 0) return;
+        string que = borrar.Count == 1 ? $"«{borrar[0].Nombre}»" : $"estos {borrar.Count} archivos";
+        if (MessageBox.Show(this, $"¿Eliminar {que} de la reserva del otro equipo?\n\nSi los necesitas otra vez, habrá que volver a enviarlos.",
                 "Eliminar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
             return;
-        Resultado r = await _envios.Archivos.BorrarArchivo(f.Url);
-        if (!r.Ok && r.Mensaje is not null)
-            MessageBox.Show(this, r.Mensaje, "Eliminar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        _thumbDone.Remove(f.Url);
+        var errores = new List<string>();
+        foreach (ArchivoRemoto f in borrar)
+        {
+            Resultado r = await _envios.Archivos.BorrarArchivo(f.Url);
+            if (!r.Ok && r.Mensaje is not null) errores.Add($"{f.Nombre}: {r.Mensaje}");
+            _thumbDone.Remove(f.Url);
+        }
+        if (errores.Count > 0)
+            MessageBox.Show(this, string.Join("\n", errores), "Eliminar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         await Reload();
     }
 

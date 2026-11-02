@@ -323,6 +323,18 @@ internal sealed class PantallasRemotas : IPantallas, IArchivosRemotos, IDisposab
 
     public Task<Resultado> Separar(string monitor) => Simple("separar", Datos(("monitor", monitor)));
 
+    public Task<Resultado> Bloquear(string? monitor, bool bloquear) =>
+        Simple("bloquear", monitor is null ? Datos(("valor", bloquear)) : Datos(("monitor", monitor), ("valor", bloquear)));
+
+    public Task<Resultado> AbrirPestana(string monitor, int zona, LinkDef enlace) =>
+        Simple("pestana_abrir", Datos(("monitor", monitor), ("zona", zona), ("enlace", Protocolo.Nodo(enlace))));
+
+    public Task<Resultado> ActivarPestana(string monitor, int zona, int indice) =>
+        Simple("pestana_activar", Datos(("monitor", monitor), ("zona", zona), ("indice", indice)));
+
+    public Task<Resultado> CerrarPestana(string monitor, int zona, int indice) =>
+        Simple("pestana_cerrar", Datos(("monitor", monitor), ("zona", zona), ("indice", indice)));
+
     public Task<Resultado> Ampliar(string monitor, int zona) => Simple("ampliar", Datos(("monitor", monitor), ("zona", zona)));
 
     public Task<Resultado> Restaurar(string? monitor) => Simple("restaurar", monitor is null ? null : Datos(("monitor", monitor)));

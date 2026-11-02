@@ -346,6 +346,7 @@ internal sealed class LaunchedWindow
     public Rectangle AppliedRegion;
     public int StyleFixes;
     public bool ReportedHung;
+    public DateTime VideoRevisado;
     public readonly object AreaGate = new();
     public Rectangle PendingArea;
     public bool AreaDirty;
@@ -403,6 +404,8 @@ internal static class MediaWrapper
         catch { return s; }
     }
 
+    public static bool EsVideo(string target) => VidExt.Contains(ExtensionOf(target).ToLowerInvariant());
+
     public static string? Prepare(string target, string dir)
     {
         string ext = ExtensionOf(target).ToLowerInvariant();
@@ -429,7 +432,7 @@ internal static class MediaWrapper
         body.quieto{cursor:none}
         video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}
         #barra{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:14px;background:rgba(20,20,20,.82);transition:opacity .25s;max-width:calc(100% - 32px);box-sizing:border-box}
-        body.quieto #barra{opacity:0;pointer-events:none}
+        body.quieto #barra{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s,visibility 0s .25s}
         button{background:none;border:0;color:#fff;font:600 14px "Segoe UI",sans-serif;padding:6px 9px;border-radius:8px;cursor:pointer;white-space:nowrap}
         button:hover{background:rgba(255,255,255,.16)}
         button.activo{background:#2563eb}
@@ -461,7 +464,7 @@ internal static class MediaWrapper
         const hora=t=>{if(!isFinite(t))return '0:00';t=Math.floor(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=String(t%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+s:m+':'+s};
         const rapidez=r=>String(r).replace('.',',')+'×';
         const aviso=t=>{const a=$('aviso');a.textContent=t;a.classList.add('ver');clearTimeout(avisar);avisar=setTimeout(()=>a.classList.remove('ver'),1200)};
-        const mostrar=()=>{document.body.classList.remove('quieto');clearTimeout(ocultar);ocultar=setTimeout(()=>{if(!$('barra').matches(':hover'))document.body.classList.add('quieto')},2500)};
+        const mostrar=()=>{if(document.body.classList.contains('quieto'))pintar();document.body.classList.remove('quieto');clearTimeout(ocultar);ocultar=setTimeout(()=>{if(!$('barra').matches(':hover'))document.body.classList.add('quieto')},2500)};
         const pintar=()=>{$('play').textContent=v.paused?'▶':'⏸';$('sonido').textContent=v.muted||v.volume===0?'🔇':'🔊';$('volumen').value=v.muted?0:Math.round(v.volume*100);$('velocidad').textContent=rapidez(v.playbackRate);$('bucle').classList.toggle('activo',v.loop);$('tiempo').textContent=hora(v.currentTime)+' / '+hora(v.duration);if(!arrastrando&&v.duration)$('avance').value=Math.round(v.currentTime/v.duration*1000)};
         const alternar=()=>{v.paused?v.play():v.pause()};
         const saltar=d=>{v.currentTime=Math.max(0,Math.min(v.duration||0,v.currentTime+d));aviso((d>0?'+':'−')+Math.abs(d)+' s')};
@@ -477,7 +480,9 @@ internal static class MediaWrapper
         $('avance').oninput=e=>{arrastrando=true;if(v.duration)v.currentTime=e.target.value/1000*v.duration};
         $('avance').onchange=()=>{arrastrando=false};
         v.onclick=alternar;
-        ['play','pause','volumechange','ratechange','timeupdate','durationchange','loadedmetadata'].forEach(n=>v.addEventListener(n,pintar));
+        ['play','pause','volumechange','ratechange','timeupdate','durationchange','loadedmetadata'].forEach(n=>v.addEventListener(n,()=>{if(!document.body.classList.contains('quieto'))pintar()}));
+        let cuadros=0,perdidos=0;
+        setInterval(()=>{if(!v.getVideoPlaybackQuality)return;const q=v.getVideoPlaybackQuality(),c=q.totalVideoFrames-cuadros,p=q.droppedVideoFrames-perdidos;cuadros=q.totalVideoFrames;perdidos=q.droppedVideoFrames;document.title=v.paused||document.visibilityState!=='visible'?'IGP_Soft':'IGP_Soft · '+c+' cuadros · '+p+' perdidos · '+v.videoWidth+'x'+v.videoHeight},10000);
         document.addEventListener('mousemove',mostrar);
         document.addEventListener('keydown',e=>{const k=e.key;let hecho=true;
         if(k===' '||k==='k'||k==='K')alternar();
@@ -754,6 +759,15 @@ internal static class WindowManager
     public const string WindowScheme = "ventana:";
 
     public static bool IsWindowSpec(string url) => url.StartsWith(WindowScheme, StringComparison.OrdinalIgnoreCase);
+
+    public static string Titulo(IntPtr hwnd)
+    {
+        int len = NativeMethods.GetWindowTextLength(hwnd);
+        if (len <= 0) return "";
+        var title = new StringBuilder(len + 1);
+        NativeMethods.GetWindowText(hwnd, title, title.Capacity);
+        return title.ToString();
+    }
 
     public static string SpecOf(OpenWindow w) => $"{WindowScheme}{w.ProcessName}|{w.Title}";
 

@@ -18,6 +18,8 @@ internal static class Hotkeys
         new(6, "abrirorden", "Abrir en orden", Keys.None),
         new(7, "cerrartodas", "Cerrar todas las ventanas", Keys.None),
         new(8, "cerrarmonitor", "Cerrar todo en el monitor bajo el mouse", Keys.None),
+        new(9, "bloquear", "Bloquear o desbloquear el monitor bajo el mouse", Keys.None),
+        new(10, "bloqueartodos", "Bloquear o desbloquear todos los monitores", Keys.None),
     };
 
     public static HashSet<string> Failed { get; } = new();

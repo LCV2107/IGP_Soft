@@ -142,5 +142,15 @@ public sealed class DocumentosPruebas : IDisposable
         foreach (string id in new[] { "play", "atras", "adelante", "avance", "sonido", "volumen", "velocidad", "bucle" })
             Assert.Contains($"id=\"{id}\"", html);
         Assert.Contains("playbackRate", html);
+        Assert.Contains("getVideoPlaybackQuality", html);
     }
+
+    [Theory]
+    [InlineData("IGP_Soft · 540 cuadros · 60 perdidos · 1920x1080", true)]
+    [InlineData("IGP_Soft · 598 cuadros · 2 perdidos · 1920x1080", false)]
+    [InlineData("IGP_Soft · 20 cuadros · 3 perdidos · 640x360", false)]
+    [InlineData("IGP_Soft", false)]
+    [InlineData("IGP_Soft · 200 cuadros · 100 perdidos · 3840x2160 — Mozilla Firefox", true)]
+    public void Reconoce_un_video_con_tirones(string titulo, bool tirones) =>
+        Assert.Equal(tirones, PantallasLocales.Tirones(titulo) is not null);
 }

@@ -399,6 +399,90 @@ internal sealed class Chip : Control
     }
 }
 
+internal sealed class Notificacion : Control
+{
+    private const int Ancho = 380;
+    private readonly System.Windows.Forms.Timer _timer = new();
+    private Control? _padre;
+    private Nivel _nivel;
+    private string _titulo = "";
+
+    public Notificacion()
+    {
+        Visible = false;
+        Cursor = Cursors.Hand;
+        Font = Theme.Body;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+        _timer.Tick += (_, _) => Ocultar();
+        Click += (_, _) => Ocultar();
+    }
+
+    public void Mostrar(string? titulo, string texto, Nivel nivel)
+    {
+        _titulo = titulo ?? "IGP_Soft";
+        Text = texto;
+        _nivel = nivel;
+        Size tam = TextRenderer.MeasureText(texto, Font, new Size(Ancho - 46, 1000), TextFormatFlags.WordBreak);
+        Size = new Size(Ancho, Math.Min(260, tam.Height + 52));
+        Ubicar();
+        Visible = true;
+        BringToFront();
+        Invalidate();
+        _timer.Stop();
+        _timer.Interval = nivel == Nivel.Info ? 5000 : 8000;
+        _timer.Start();
+    }
+
+    public void Ocultar()
+    {
+        _timer.Stop();
+        Visible = false;
+    }
+
+    private void Ubicar()
+    {
+        if (Parent is null) return;
+        Rectangle r = Parent.ClientRectangle;
+        Location = new Point(Math.Max(0, r.Right - Width - 20), Math.Max(0, r.Bottom - Height - 20));
+    }
+
+    protected override void OnParentChanged(EventArgs e)
+    {
+        base.OnParentChanged(e);
+        if (_padre is not null) _padre.Resize -= OnPadreResize;
+        _padre = Parent;
+        if (_padre is not null) _padre.Resize += OnPadreResize;
+    }
+
+    private void OnPadreResize(object? sender, EventArgs e) => Ubicar();
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? Theme.Background);
+        Theme.Smooth(g);
+        var card = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        Color color = _nivel switch { Nivel.Error => Theme.Danger, Nivel.Aviso => Theme.Warning, _ => Theme.Accent };
+        Theme.FillRound(g, Theme.Sidebar, card, 10);
+        using (var b = new SolidBrush(color)) g.FillRectangle(b, 10, 12, 4, Height - 24);
+        TextRenderer.DrawText(g, _titulo, Theme.BodyBold, new Rectangle(26, 10, Width - 60, 22), Color.White,
+            TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, "✕", Theme.Small, new Rectangle(Width - 30, 10, 20, 20), Theme.SidebarMuted, TextFormatFlags.HorizontalCenter);
+        TextRenderer.DrawText(g, Text, Font, new Rectangle(26, 34, Width - 46, Height - 42), Theme.SidebarText,
+            TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _timer.Dispose();
+            if (_padre is not null) _padre.Resize -= OnPadreResize;
+        }
+        base.Dispose(disposing);
+    }
+}
+
 internal sealed class RoundedTextBox : Panel
 {
     public TextBox Box { get; } = new();

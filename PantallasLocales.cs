@@ -66,12 +66,15 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         {
             CheckClosedWindows();
             EnforceWindows();
+            foreach (DisplaySurface surface in _surfaces.Values)
+                if (!surface.IsDisposed) surface.BarrasAlFrente();
         };
         _guard.Start();
         _maintenance.Tick += (_, _) =>
         {
             int hours = Profiles.ReloadHours;
             if (hours > 0 && DateTime.Now - _lastReload >= TimeSpan.FromHours(hours)) ReloadAll();
+            RevisarVideos();
         };
         _maintenance.Start();
         WindowWatcher.Start(OnWindowMoved);
@@ -98,8 +101,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         if (_disposed) return;
         _seq++;
         foreach (PantallaMonitor t in _pantallas)
-            if (_surfaces.TryGetValue(t.Device, out DisplaySurface? surface) && !surface.IsDisposed)
-                surface.SetContents(t.Usable.Where(s => s.Link is not null).Select(s => s.Link!.Titulo.TrimStart('▣', ' ')));
+        {
+            if (!_surfaces.TryGetValue(t.Device, out DisplaySurface? surface) || surface.IsDisposed) continue;
+            surface.SetBarras(t.Bloqueado ? new() : Barras(t));
+            if (!t.Bloqueado) surface.SetContents(t.Usable.Where(s => s.Link is not null).Select(s => s.Link!.Titulo.TrimStart('▣', ' ')));
+        }
         Cambio?.Invoke(Estado);
     }
 
@@ -142,11 +148,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         List<MonitorInfo> current = MonitorGroups.Apply(MonitorEnumerator.GetOrdered());
         var currentDevices = current.Select(m => m.DeviceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (PantallaMonitor missing in _pantallas.Where(t => !currentDevices.Contains(t.Device)).ToList())
-            CloseTileWindows(missing);
+            CloseTileWindows(missing, congeladas: true);
 
-        var prev = new Dictionary<string, (GridLayout layout, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items)>();
+        var prev = new Dictionary<string, (GridLayout layout, List<(LinkDef? Link, LaunchedWindow? Win, object? Pending)> items, PantallaMonitor tile)>();
         foreach (PantallaMonitor t in _pantallas)
-            prev[t.Device] = (t.Grid, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList());
+            prev[t.Device] = (t.Grid, t.Segments.Select(s => (s.Link, s.Launched, s.Pending)).ToList(), t);
         _pantallas.Clear();
 
         _monitors = SavedOrder(current);
@@ -175,7 +181,15 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                     tile.Segments[k].Link = pv.items[k].Link;
                     tile.Segments[k].Launched = pv.items[k].Win;
                     tile.Segments[k].Pending = pv.items[k].Pending;
+                    if (k < pv.tile.Segments.Count)
+                    {
+                        tile.Segments[k].Pestanas.AddRange(pv.tile.Segments[k].Pestanas);
+                        tile.Segments[k].Activa = pv.tile.Segments[k].Activa;
+                    }
                 }
+                tile.Bloqueado = pv.tile.Bloqueado;
+                tile.GrillaProyectada = pv.tile.GrillaProyectada;
+                tile.Congeladas.AddRange(pv.tile.Congeladas);
             }
             _pantallas.Add(tile);
 
@@ -185,6 +199,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 foreach (Segment s in tile.Segments)
                     if (s.Launched is not null)
                         WindowManager.Reposition(s.Launched, AreaOf(tile, s));
+                foreach (Congelada c in tile.Congeladas)
+                    WindowManager.Reposition(c.Win, c.Area);
             }
         }
 
@@ -307,12 +323,25 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         {
             foreach (Segment s in t.Segments.ToList())
             {
+                for (int i = s.Pestanas.Count - 1; i >= 0; i--)
+                    if (i < s.Pestanas.Count && s.Pestanas[i].Win is { } pw && !NativeMethods.IsWindow(pw.Hwnd))
+                    {
+                        CerrarPestanaEn(t, s, i);
+                        cambio = true;
+                    }
                 if (s.Launched is null || NativeMethods.IsWindow(s.Launched.Hwnd)) continue;
 
                 LaunchedWindow w = s.Launched;
                 s.Launched = null;
                 if (s.Link is not null) { _openedUrls.Remove(s.Link.Url); s.Link = null; }
                 Task.Run(() => WindowManager.Close(w));
+                cambio = true;
+            }
+            foreach (Congelada c in t.Congeladas.ToList())
+            {
+                if (NativeMethods.IsWindow(c.Win.Hwnd)) continue;
+                t.Congeladas.Remove(c);
+                Task.Run(() => WindowManager.Close(c.Win));
                 cambio = true;
             }
             CloseSurfaceIfEmpty(t);
@@ -330,6 +359,21 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                     WindowManager.Reposition(w, AreaOf(t, s));
                     return;
                 }
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Congelada c in t.Congeladas)
+                if (c.Win.Hwnd == hwnd)
+                {
+                    WindowManager.Reposition(c.Win, c.Area);
+                    return;
+                }
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Segments)
+                foreach (Pestana p in s.Pestanas)
+                    if (p.Win is { } w && w.Hwnd == hwnd)
+                    {
+                        WindowManager.Reposition(w, AreaOf(t, s));
+                        return;
+                    }
     }
 
     private void EnforceWindows()
@@ -342,15 +386,27 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     {
         foreach (Segment s in t.Segments)
         {
+            foreach (Pestana p in s.Pestanas)
+                if (p.Win is not null && p.Win != s.Launched)
+                {
+                    p.Win.Hidden = true;
+                    WindowManager.Reposition(p.Win, AreaOf(t, s));
+                }
             if (s.Launched is null) continue;
             s.Launched.Hidden = t.Maximized is not null && s != t.Maximized;
             WindowManager.Reposition(s.Launched, AreaOf(t, s));
+        }
+        foreach (Congelada c in t.Congeladas)
+        {
+            c.Win.Hidden = c.Oculta;
+            WindowManager.Reposition(c.Win, c.Area);
         }
     }
 
     public bool ReloadAll()
     {
         _lastReload = DateTime.Now;
+        if (_pantallas.Any(t => t.Bloqueado)) return false;
         bool any = _pantallas.Any(t => t.Segments.Any(s => s.Launched is { Attached: false, Native: false }));
         if (!any) return false;
         _ = ReloadAllAsync();
@@ -363,6 +419,27 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         CloseAllWindows();
         await Task.Delay(3500);
         if (!_disposed) ApplyProfile(snapshot);
+    }
+
+    private void RevisarVideos()
+    {
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Usable)
+            {
+                if (s.Link is null || s.Launched is not { Closed: false, Native: false } w || !MediaWrapper.EsVideo(s.Link.Url)) continue;
+                if (DateTime.Now - w.VideoRevisado < TimeSpan.FromMinutes(2)) continue;
+                if (Tirones(WindowManager.Titulo(w.Hwnd)) is not { } m) continue;
+                w.VideoRevisado = DateTime.Now;
+                Diagnostico.Log($"Video con tirones en el monitor {t.Number}, zona {t.DisplayNumber(s)} («{s.Link.Titulo}»): {m.Perdidos} de {m.Cuadros + m.Perdidos} cuadros perdidos en 10 s, video de {m.Tamano}, zona de {s.Area.Width}x{s.Area.Height}");
+            }
+    }
+
+    public static (int Cuadros, int Perdidos, string Tamano)? Tirones(string titulo)
+    {
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(titulo, @"(\d+) cuadros · (\d+) perdidos · (\d+x\d+)");
+        if (!m.Success) return null;
+        int cuadros = int.Parse(m.Groups[1].Value), perdidos = int.Parse(m.Groups[2].Value);
+        return perdidos * 10 >= cuadros + perdidos && perdidos >= 5 ? (cuadros, perdidos, m.Groups[3].Value) : null;
     }
 
     public static Bitmap? CaptureMonitor(MonitorInfo monitor, int width)
@@ -399,6 +476,17 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             var r = new Resultado(false, "enlace_en_uso", "Enlace en uso", $"El enlace «{link.Titulo}» ya está abierto en otra zona.");
             Avisar(r);
             return r;
+        }
+
+        if (tile.Bloqueado)
+        {
+            Congelar(tile, seg);
+            OlvidarPestanas(seg);
+            if (seg.Link is not null) _openedUrls.Remove(seg.Link.Url);
+            seg.Link = link;
+            _openedUrls.Add(link.Url);
+            Notify();
+            return Resultado.Bien;
         }
 
         if (seg.Launched is not null || seg.Link is not null) CloseSeg(tile, seg);
@@ -636,7 +724,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         foreach (Segment s in old.Where(s => s.Busy && !carry.ContainsKey(s.Index)))
             CloseSeg(tile, s);
 
-        var moving = carry.Select(kv => (Target: kv.Value, old[kv.Key].Link, old[kv.Key].Launched, old[kv.Key].Pending)).ToList();
+        var moving = carry.Select(kv => (Target: kv.Value, old[kv.Key].Link, old[kv.Key].Launched, old[kv.Key].Pending,
+            Tabs: old[kv.Key].Pestanas.ToList(), old[kv.Key].Activa)).ToList();
         tile.Apply(layout);
         foreach (var m in moving)
         {
@@ -644,6 +733,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             seg.Link = m.Link;
             seg.Launched = m.Launched;
             seg.Pending = m.Pending;
+            seg.Pestanas.AddRange(m.Tabs);
+            seg.Activa = m.Activa;
             if (seg.Launched is not null) seg.Launched.Hidden = false;
             if (seg.Launched is not null)
                 WindowManager.Reposition(seg.Launched, AreaOf(tile, seg));
@@ -661,14 +752,28 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     private void CloseSeg(PantallaMonitor tile, Segment seg)
     {
+        if (tile.Bloqueado)
+        {
+            if (tile.Maximized == seg) tile.Maximized = null;
+            Congelar(tile, seg);
+            OlvidarPestanas(seg);
+            seg.Pending = null;
+            if (seg.Link is not null)
+            {
+                _openedUrls.Remove(seg.Link.Url);
+                seg.Link = null;
+            }
+            Notify();
+            return;
+        }
         bool wasMax = tile.Maximized == seg;
         if (wasMax) tile.Maximized = null;
+        foreach (Pestana p in seg.Pestanas)
+            if (p.Win is not null && p.Win != seg.Launched) CerrarVentana(tile, p.Win);
+        OlvidarPestanas(seg);
         if (seg.Launched is not null)
         {
-            LaunchedWindow w = seg.Launched;
-            if (w.Attached) TrackWindowTask(tile.Device, WindowManager.ReleaseAsync(w));
-            else if (w.Native) NativeImage.Dispose(w);
-            else Task.Run(() => WindowManager.Close(w));
+            CerrarVentana(tile, seg.Launched);
             seg.Launched = null;
         }
         if (wasMax) EnforceTile(tile);
@@ -682,16 +787,288 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         CloseSurfaceIfEmpty(tile);
     }
 
-    private void CloseTileWindows(PantallaMonitor tile)
+    private void CerrarVentana(PantallaMonitor tile, LaunchedWindow w)
+    {
+        if (w.Attached) TrackWindowTask(tile.Device, WindowManager.ReleaseAsync(w));
+        else if (w.Native) NativeImage.Dispose(w);
+        else Task.Run(() => WindowManager.Close(w));
+    }
+
+    private void Congelar(PantallaMonitor tile, Segment seg)
+    {
+        if (seg.Launched is not null)
+            tile.Congeladas.Add(new Congelada
+            {
+                Link = seg.Link ?? new LinkDef("", ""),
+                Win = seg.Launched,
+                Zona = seg.Index,
+                Area = AreaOf(tile, seg),
+                Oculta = seg.Launched.Hidden,
+                Pestanas = seg.Pestanas.Count > 1 ? seg.Pestanas.Select(p => p.Link).ToList() : null,
+                Activa = seg.Activa,
+            });
+        foreach (Pestana p in seg.Pestanas)
+        {
+            if (p.Win is not null && p.Win != seg.Launched)
+                tile.Congeladas.Add(new Congelada { Link = p.Link, Win = p.Win, Zona = seg.Index, Area = AreaOf(tile, seg), Oculta = true, EsPestana = true });
+            p.Win = null;
+        }
+        seg.Launched = null;
+    }
+
+    private void OlvidarPestanas(Segment seg)
+    {
+        foreach (Pestana p in seg.Pestanas)
+            if (!string.Equals(p.Link.Url, seg.Link?.Url, StringComparison.OrdinalIgnoreCase))
+                _openedUrls.Remove(p.Link.Url);
+        seg.Pestanas.Clear();
+        seg.Activa = 0;
+    }
+
+    private static List<(int Zona, Rectangle Area, IReadOnlyList<PestanaVista> Pestanas, int Activa)> Barras(PantallaMonitor t) =>
+        t.Usable.Where(s => s.Link is not null && PestanasWeb.EsWeb(s.Link.Url)
+                            && (s.Launched is { Native: false, Attached: false } || s.Pestanas.Count > 0)
+                            && (t.Maximized is null || t.Maximized == s))
+                .Select(s => (s.Index, AreaOf(t, s),
+                    (IReadOnlyList<PestanaVista>)(s.Pestanas.Count > 0
+                        ? s.Pestanas.Select(p => new PestanaVista(p.Link.Titulo, p.Win is null)).ToList()
+                        : new List<PestanaVista> { new(s.Link!.Titulo, false) }),
+                    s.Pestanas.Count > 0 ? s.Activa : 0))
+                .ToList();
+
+    private Resultado AvisoPestana(bool quiet, string codigo, string mensaje)
+    {
+        var r = new Resultado(false, codigo, "Pestañas", quiet ? null : mensaje, Nivel.Aviso);
+        Avisar(r);
+        return r;
+    }
+
+    public async Task<Resultado> AgregarPestana(PantallaMonitor tile, Segment seg, LinkDef link, bool quiet, bool activar)
+    {
+        if (tile.Excluded || seg.Disabled) return Resultado.Falla("no_disponible");
+        if (!PestanasWeb.EsWeb(link.Url)) return AvisoPestana(quiet, "solo_web", "Solo se pueden abrir páginas web en pestañas.");
+        if (seg.Link is null || !PestanasWeb.EsWeb(seg.Link.Url) || (!tile.Bloqueado && seg.Launched is { Native: true } or { Attached: true }))
+            return AvisoPestana(quiet, "zona_sin_pagina", "Las pestañas solo se pueden agregar a una zona que muestra una página web.");
+        if (!tile.Bloqueado && (seg.Launched is null || Browser is null)) return Resultado.Falla("no_disponible");
+        if (Math.Max(1, seg.Pestanas.Count) >= PestanasWeb.Maximo)
+            return AvisoPestana(quiet, "maximo_pestanas", $"Cada zona admite hasta {PestanasWeb.Maximo} pestañas.");
+        if (_openedUrls.Contains(link.Url))
+            return AvisoPestana(quiet, "enlace_en_uso", $"El enlace «{link.Titulo}» ya está abierto en otra zona o pestaña.");
+
+        if (seg.Pestanas.Count == 0) seg.Pestanas.Add(new Pestana { Link = seg.Link, Win = seg.Launched });
+        var tab = new Pestana { Link = link };
+        seg.Pestanas.Add(tab);
+        _openedUrls.Add(link.Url);
+        if (activar) seg.Activa = seg.Pestanas.Count - 1;
+        if (tile.Bloqueado)
+        {
+            if (activar) seg.Link = link;
+            Notify();
+            return Resultado.Bien;
+        }
+        return await LanzarPestana(tile, seg, tab, quiet);
+    }
+
+    private async Task<Resultado> LanzarPestana(PantallaMonitor tile, Segment seg, Pestana tab, bool quiet)
+    {
+        DisplaySurface surface;
+        try
+        {
+            if (Browser is null) throw new InvalidOperationException("No hay un navegador compatible.");
+            surface = EnsureSurface(tile);
+        }
+        catch (Exception ex)
+        {
+            int idx = seg.Pestanas.IndexOf(tab);
+            if (idx >= 0) CerrarPestanaEn(tile, seg, idx);
+            return AvisoPestana(quiet, "navegador", $"No se pudo abrir la pestaña «{tab.Link.Titulo}»:\n{ex.Message}");
+        }
+        var token = new object();
+        tab.Pending = token;
+        if (seg.Pestanas.IndexOf(tab) == seg.Activa) seg.Pending = token;
+        _openedUrls.Add(tab.Link.Url);
+        Notify();
+
+        Browser browser = Browser!;
+        bool keepData = Profiles.KeepData;
+        Rectangle area = AreaOf(tile, seg);
+        string tag = $"{tile.Monitor.ShortName}-{seg.Index}-p{seg.Pestanas.IndexOf(tab)}";
+        IntPtr parent = surface.Handle;
+        string url = tab.Link.Url;
+        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, url, area, tag, parent, keepData));
+        _pendingLaunches.Add(launch);
+        LaunchedWindow? win = null;
+        string? error = null;
+        try { win = await launch; }
+        catch (Exception ex) { error = ex.Message; }
+        finally { _pendingLaunches.Remove(launch); }
+
+        (PantallaMonitor? t, Segment? s, int i) = FindPestana(token);
+        if (_disposed || t is null || s is null)
+        {
+            if (win is not null) _ = Task.Run(() => WindowManager.Close(win));
+            return Resultado.Falla("cancelada");
+        }
+        Pestana p = s.Pestanas[i];
+        p.Pending = null;
+        if (ReferenceEquals(s.Pending, token)) s.Pending = null;
+        if (win is null)
+        {
+            CerrarPestanaEn(t, s, i);
+            return AvisoPestana(quiet, "navegador", error is not null
+                ? $"No se pudo abrir el navegador:\n{error}"
+                : $"No se pudo integrar la pestaña «{p.Link.Titulo}» en la pantalla.");
+        }
+        if (t.Bloqueado)
+        {
+            t.Congeladas.Add(new Congelada { Link = p.Link, Win = win, Zona = s.Index, Area = AreaOf(t, s), Oculta = true, EsPestana = true });
+            Notify();
+            return Resultado.Bien;
+        }
+        p.Win = win;
+        bool activa = i == s.Activa;
+        if (activa)
+        {
+            s.Launched = win;
+            s.Link = p.Link;
+        }
+        win.Hidden = !activa;
+        if (s.Pestanas.Count == 1)
+        {
+            s.Pestanas.Clear();
+            s.Activa = 0;
+        }
+        EnforceTile(t);
+        if (activa) AlFrente(t, win);
+        Notify();
+        SaveLastSession();
+        ZoneOpened?.Invoke();
+        return Resultado.Bien;
+    }
+
+    private (PantallaMonitor? Tile, Segment? Seg, int Indice) FindPestana(object token)
+    {
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Segments)
+                for (int i = 0; i < s.Pestanas.Count; i++)
+                    if (ReferenceEquals(s.Pestanas[i].Pending, token)) return (t, s, i);
+        return (null, null, -1);
+    }
+
+    public void ActivarPestana(PantallaMonitor tile, Segment seg, int i)
+    {
+        if (i < 0 || i >= seg.Pestanas.Count || i == seg.Activa) return;
+        Pestana tab = seg.Pestanas[i];
+        if (!tile.Bloqueado && tab.Win is null) return;
+        seg.Activa = i;
+        seg.Link = tab.Link;
+        if (!tile.Bloqueado)
+        {
+            seg.Pending = null;
+            seg.Launched = tab.Win;
+            tab.Win!.Hidden = false;
+            EnforceTile(tile);
+            AlFrente(tile, tab.Win);
+        }
+        Notify();
+        SaveLastSession();
+    }
+
+    public void CerrarPestanaEn(PantallaMonitor tile, Segment seg, int i)
+    {
+        if (seg.Pestanas.Count == 0)
+        {
+            if (i == 0 && seg.Link is not null) CloseZone(tile, seg);
+            return;
+        }
+        if (i < 0 || i >= seg.Pestanas.Count) return;
+        Pestana tab = seg.Pestanas[i];
+        if (tab.Win is not null) CerrarVentana(tile, tab.Win);
+        if (tab.Pending is not null && ReferenceEquals(seg.Pending, tab.Pending)) seg.Pending = null;
+        _openedUrls.Remove(tab.Link.Url);
+        seg.Pestanas.RemoveAt(i);
+        if (seg.Pestanas.Count == 0)
+        {
+            seg.Link = null;
+            seg.Launched = null;
+            seg.Activa = 0;
+            Notify();
+            CloseSurfaceIfEmpty(tile);
+            SaveLastSession();
+            return;
+        }
+        if (i < seg.Activa) seg.Activa--;
+        else if (seg.Activa >= seg.Pestanas.Count) seg.Activa = seg.Pestanas.Count - 1;
+        Pestana activa = seg.Pestanas[seg.Activa];
+        seg.Link = activa.Link;
+        seg.Launched = tile.Bloqueado ? null : activa.Win;
+        if (seg.Launched is null && activa.Pending is not null) seg.Pending = activa.Pending;
+        if (seg.Pestanas.Count == 1 && (activa.Win is not null || tile.Bloqueado))
+        {
+            seg.Pestanas.Clear();
+            seg.Activa = 0;
+        }
+        EnforceTile(tile);
+        if (seg.Launched is { } w)
+        {
+            w.Hidden = tile.Maximized is not null && tile.Maximized != seg;
+            AlFrente(tile, w);
+        }
+        Notify();
+        CloseSurfaceIfEmpty(tile);
+        SaveLastSession();
+    }
+
+    private void AlFrente(PantallaMonitor tile, LaunchedWindow win)
+    {
+        NativeMethods.SetWindowPos(win.Hwnd, NativeMethods.HWND_TOP, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_ASYNCWINDOWPOS);
+        if (_surfaces.TryGetValue(tile.Device, out DisplaySurface? surface) && !surface.IsDisposed) surface.BarrasAlFrente();
+    }
+
+    private async Task AbrirZonaAsync(PantallaMonitor t, Segment s, LinkDef link, List<LinkDef>? pestanas, int activa, bool quiet = true)
+    {
+        Resultado r = await OpenAsync(t, s, link, quiet);
+        if (!r.Ok || pestanas is null || pestanas.Count < 2) return;
+        foreach (LinkDef p in pestanas.Skip(1))
+        {
+            string? primera = s.Pestanas.Count > 0 ? s.Pestanas[0].Link.Url : s.Link?.Url;
+            if (_disposed || !string.Equals(primera, link.Url, StringComparison.OrdinalIgnoreCase)) return;
+            await AgregarPestana(t, s, p, quiet, activar: false);
+        }
+        if (activa > 0 && activa < s.Pestanas.Count) ActivarPestana(t, s, activa);
+    }
+
+    private void EnZona(string device, int zona, Action<PantallaMonitor, Segment> accion)
+    {
+        if (_disposed) return;
+        if (_pantallas.FirstOrDefault(t => t.Device.Equals(device, StringComparison.OrdinalIgnoreCase)) is not { } tile) return;
+        if (tile.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return;
+        accion(tile, seg);
+    }
+
+    private void PedirPestana(string device, int zona, DisplaySurface surface)
+    {
+        using var f = new NuevaPestanaForm(LinkStore.Links);
+        if (f.ShowDialog(surface) != DialogResult.OK || f.Resultado is not { } link) return;
+        EnZona(device, zona, (t, s) => _ = AgregarPestana(t, s, link, quiet: false, activar: true));
+    }
+
+    private void CloseTileWindows(PantallaMonitor tile, bool congeladas = false)
     {
         foreach (Segment s in tile.Segments.ToList())
             if (s.Launched is not null || s.Link is not null || s.Pending is not null)
                 CloseSeg(tile, s);
+        if (!congeladas || tile.Congeladas.Count == 0) return;
+        foreach (Congelada c in tile.Congeladas) CerrarVentana(tile, c.Win);
+        tile.Congeladas.Clear();
+        tile.GrillaProyectada = tile.Grid;
+        CloseSurfaceIfEmpty(tile);
     }
 
     public void CloseAllWindows()
     {
-        foreach (PantallaMonitor t in _pantallas.ToList()) CloseTileWindows(t);
+        foreach (PantallaMonitor t in _pantallas.ToList()) CloseTileWindows(t, congeladas: true);
         CloseAllSurfaces();
     }
 
@@ -700,6 +1077,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         if (!_surfaces.TryGetValue(tile.Device, out DisplaySurface? surface) || surface.IsDisposed)
         {
             surface = new DisplaySurface(tile.Monitor, tile.Number, _icon);
+            string device = tile.Device;
+            DisplaySurface creada = surface;
+            surface.PestanaActivada += (zona, i) => EnZona(device, zona, (t, s) => ActivarPestana(t, s, i));
+            surface.PestanaCerrada += (zona, i) => EnZona(device, zona, (t, s) => CerrarPestanaEn(t, s, i));
+            surface.PestanaNueva += zona => PedirPestana(device, zona, creada);
             _surfaces[tile.Device] = surface;
             surface.Show();
         }
@@ -717,7 +1099,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     private void CloseSurfaceIfEmpty(PantallaMonitor tile)
     {
-        if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null)) return;
+        if (tile.Segments.Any(s => s.Launched is not null || s.Pending is not null) || tile.Congeladas.Count > 0) return;
         if (WindowTasksPending(tile.Device)) return;
         if (!_surfaces.Remove(tile.Device, out DisplaySurface? surface)) return;
         if (!surface.IsDisposed) surface.Close();
@@ -742,9 +1124,9 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     private void CloseAllSurfaces()
     {
-        var releases = _pantallas.SelectMany(t => t.Segments)
-                                 .Where(s => s.Launched is { Attached: true })
-                                 .Select(s => WindowManager.ReleaseAsync(s.Launched!))
+        var releases = _pantallas.SelectMany(Ventanas)
+                                 .Where(w => w.Attached)
+                                 .Select(WindowManager.ReleaseAsync)
                                  .Concat(_windowTasks.Values.SelectMany(l => l))
                                  .ToList();
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -776,17 +1158,19 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     public void CloseEverything()
     {
-        var windows = _pantallas.SelectMany(t => t.Segments)
-                                .Where(s => s.Launched is not null)
-                                .Select(s => s.Launched!)
-                                .ToList();
+        var windows = _pantallas.SelectMany(Ventanas).ToList();
         CloseAllSurfaces();
         foreach (LaunchedWindow window in windows) WindowManager.Close(window);
     }
 
+    private static IEnumerable<LaunchedWindow> Ventanas(PantallaMonitor t) =>
+        t.Segments.Where(s => s.Launched is not null).Select(s => s.Launched!)
+         .Concat(t.Segments.SelectMany(s => s.Pestanas.Where(p => p.Win is not null && p.Win != s.Launched).Select(p => p.Win!)))
+         .Concat(t.Congeladas.Select(c => c.Win));
+
     public bool CloseAll()
     {
-        if (_pantallas.All(t => t.Segments.All(s => s.Launched is null && s.Pending is null))) return false;
+        if (_pantallas.All(t => t.Congeladas.Count == 0 && t.Segments.All(s => s.Launched is null && s.Pending is null && s.Link is null))) return false;
         CloseAllWindows();
         SaveLastSession();
         return true;
@@ -811,32 +1195,133 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         SaveLastSession();
     }
 
-    public LayoutProfile Snapshot(string name) => new()
+    public LayoutProfile Snapshot(string name, bool proyectado = false) => new()
     {
         Name = name,
         Browser = Browser?.Name,
         Saved = DateTime.Now,
-        Monitors = _pantallas.Select(t => new MonitorLayout
+        Monitors = _pantallas.Select(t =>
         {
-            Number = t.Number,
-            Device = t.Device,
-            Hardware = t.Id,
-            Primary = t.Monitor.IsPrimary,
-            Excluded = t.Excluded,
-            Zones = t.Segments.Count,
-            Cols = t.Cols,
-            Rows = t.Rows,
-            Layout = t.Grid.IsUniform ? null : t.Grid.Zones.ToList(),
-            Links = t.Segments.Where(s => s.Link is not null)
-                              .Select(s => new ZoneLayout { Zone = s.Index, Titulo = s.Link!.Titulo, Url = s.Link.Url })
-                              .ToList(),
+            bool real = proyectado && t.Bloqueado;
+            GridLayout grid = real ? t.GrillaProyectada ?? t.Grid : t.Grid;
+            return new MonitorLayout
+            {
+                Number = t.Number,
+                Device = t.Device,
+                Hardware = t.Id,
+                Primary = t.Monitor.IsPrimary,
+                Excluded = t.Excluded,
+                Zones = grid.Zones.Count,
+                Cols = grid.Cols,
+                Rows = grid.Rows,
+                Layout = grid.IsUniform ? null : grid.Zones.ToList(),
+                Links = real
+                    ? t.Congeladas.Where(c => !c.EsPestana)
+                                  .Select(c => new ZoneLayout { Zone = c.Zona, Titulo = c.Link.Titulo, Url = c.Link.Url, Pestanas = c.Pestanas, Activa = c.Activa })
+                                  .ToList()
+                    : t.Segments.Where(s => s.Link is not null)
+                                .Select(s => new ZoneLayout
+                                {
+                                    Zone = s.Index, Titulo = s.Link!.Titulo, Url = s.Link.Url,
+                                    Pestanas = s.Pestanas.Count > 1 ? s.Pestanas.Select(p => p.Link).ToList() : null,
+                                    Activa = s.Pestanas.Count > 1 ? s.Activa : 0,
+                                })
+                                .ToList(),
+            };
         }).ToList(),
     };
 
     public void SaveLastSession()
     {
         if (!SessionReady || _applyingProfile) return;
-        ProfileStore.Put(Snapshot(ProfileStore.LastSession));
+        ProfileStore.Put(Snapshot(ProfileStore.LastSession, proyectado: true));
+    }
+
+    public Resultado Bloquear(PantallaMonitor tile)
+    {
+        if (tile.Bloqueado || tile.Excluded) return Resultado.Bien;
+        if (tile.Segments.Any(s => s.Pending is not null || s.Pestanas.Any(p => p.Pending is not null)))
+        {
+            var r = new Resultado(false, "abriendo", "Bloquear proyección",
+                $"Espera a que termine de abrirse lo que está cargando en el monitor {tile.Number} y vuelve a intentarlo.", Nivel.Aviso);
+            Avisar(r);
+            return r;
+        }
+        tile.GrillaProyectada = tile.Grid;
+        foreach (Segment s in tile.Segments) Congelar(tile, s);
+        tile.Maximized = null;
+        tile.Bloqueado = true;
+        Notify();
+        return Resultado.Bien;
+    }
+
+    public void Desbloquear(PantallaMonitor tile)
+    {
+        if (!tile.Bloqueado) return;
+        tile.Bloqueado = false;
+        tile.GrillaProyectada = null;
+        List<Congelada> congeladas = tile.Congeladas.ToList();
+        tile.Congeladas.Clear();
+        tile.Maximized = null;
+
+        foreach (Segment s in tile.Segments.Where(s => s.Disabled && s.Link is not null))
+        {
+            OlvidarPestanas(s);
+            _openedUrls.Remove(s.Link!.Url);
+            s.Link = null;
+        }
+        var destinos = new List<(Segment Seg, Pestana? Tab)>();
+        foreach (Segment s in tile.Usable.Where(s => s.Link is not null))
+        {
+            if (s.Pestanas.Count == 0) destinos.Add((s, null));
+            else destinos.AddRange(s.Pestanas.Select(p => (s, (Pestana?)p)));
+        }
+        var plan = PlanDesbloqueo(destinos.Select((d, i) => (i, d.Tab?.Link.Url ?? d.Seg.Link!.Url)).ToList(),
+            congeladas.Select(c => c.Link.Url).ToList());
+        foreach ((int key, int k) in plan.Reusar)
+        {
+            (Segment seg, Pestana? tab) = destinos[key];
+            LaunchedWindow win = congeladas[k].Win;
+            bool visible = tab is null || seg.Pestanas.IndexOf(tab) == seg.Activa;
+            if (tab is not null) tab.Win = win;
+            if (visible) seg.Launched = win;
+            win.Hidden = !visible;
+            WindowManager.Reposition(win, AreaOf(tile, seg));
+        }
+        foreach (int k in plan.Cerrar) CerrarVentana(tile, congeladas[k].Win);
+
+        var abrir = new List<(Segment Seg, LinkDef Link)>();
+        var pestanas = new List<(Segment Seg, Pestana Tab)>();
+        foreach (int key in plan.Abrir)
+        {
+            (Segment seg, Pestana? tab) = destinos[key];
+            if (tab is not null) { pestanas.Add((seg, tab)); continue; }
+            abrir.Add((seg, seg.Link!));
+            _openedUrls.Remove(seg.Link!.Url);
+            seg.Link = null;
+        }
+        EnforceTile(tile);
+        Notify();
+        foreach ((Segment seg, LinkDef link) in abrir) _ = OpenAsync(tile, seg, link);
+        foreach ((Segment seg, Pestana tab) in pestanas) _ = LanzarPestana(tile, seg, tab, quiet: false);
+        CloseSurfaceIfEmpty(tile);
+        SaveLastSession();
+    }
+
+    public static (List<(int Zona, int Congelada)> Reusar, List<int> Abrir, List<int> Cerrar) PlanDesbloqueo(
+        IReadOnlyList<(int Zona, string Url)> borrador, IReadOnlyList<string> congeladas)
+    {
+        var libres = Enumerable.Range(0, congeladas.Count).ToList();
+        var reusar = new List<(int, int)>();
+        var abrir = new List<int>();
+        foreach ((int zona, string url) in borrador)
+        {
+            int k = libres.FirstOrDefault(i => string.Equals(congeladas[i], url, StringComparison.OrdinalIgnoreCase), -1);
+            if (k < 0) { abrir.Add(zona); continue; }
+            reusar.Add((zona, k));
+            libres.Remove(k);
+        }
+        return (reusar, abrir, libres);
     }
 
     public void ApplyProfile(LayoutProfile p)
@@ -865,7 +1350,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         {
             foreach (PantallaMonitor t in _pantallas.Where(t => !used.Contains(t))) CloseTileWindows(t);
 
-            var wanted = new List<(PantallaMonitor Tile, Segment Seg, LinkDef Link)>();
+            var wanted = new List<(PantallaMonitor Tile, Segment Seg, LinkDef Link, ZoneLayout? Zone)>();
             foreach ((PantallaMonitor t, MonitorLayout ml) in plan)
             {
                 if (t.Excluded != ml.Excluded) ToggleExcluded(t);
@@ -879,18 +1364,19 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                     if (s.Disabled) continue;
                     ZoneLayout? z = ml.Links.FirstOrDefault(l => l.Zone == s.Index);
                     LinkDef? link = z is null ? null
+                        : z.Pestanas is { Count: > 1 } tabs ? tabs[0]
                         : LinkStore.Links.FirstOrDefault(l => l.Url.Equals(z.Url, StringComparison.OrdinalIgnoreCase))
                           ?? new LinkDef(z.Titulo, z.Url);
                     if (s.Link?.Url.Equals(link?.Url, StringComparison.OrdinalIgnoreCase) == true) continue;
 
                     if (s.Link is not null || s.Launched is not null || s.Pending is not null) CloseSeg(t, s);
-                    if (link is not null) wanted.Add((t, s, link));
+                    if (link is not null) wanted.Add((t, s, link, z));
                 }
             }
 
-            foreach ((PantallaMonitor t, Segment s, LinkDef link) in wanted)
+            foreach ((PantallaMonitor t, Segment s, LinkDef link, ZoneLayout? z) in wanted)
                 if (!_openedUrls.Contains(link.Url))
-                    _ = OpenAsync(t, s, link, quiet: true);
+                    _ = AbrirZonaAsync(t, s, link, z?.Pestanas, z?.Activa ?? 0);
         }
         finally { _applyingProfile = false; }
 
@@ -957,7 +1443,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
     public void Maximize(PantallaMonitor tile, Segment seg)
     {
-        if (seg.Disabled || !seg.Busy || tile.Segments.Count <= 1 || tile.Maximized == seg) return;
+        if (tile.Bloqueado || seg.Disabled || !seg.Busy || tile.Segments.Count <= 1 || tile.Maximized == seg) return;
         tile.Maximized = seg;
         EnforceTile(tile);
         if (seg.Launched is not null)
@@ -1000,6 +1486,8 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 s.Link = s.Link with { Url = to };
                 _openedUrls.Add(to);
             }
+        foreach (Congelada c in _pantallas.SelectMany(t => t.Congeladas))
+            if (map.TryGetValue(c.Link.Url, out string? to)) c.Link = c.Link with { Url = to };
         Notify();
         SaveLastSession();
     }
@@ -1098,6 +1586,45 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     {
         if (FindMonitor(monitor) is not { } t) return NoMonitor();
         SeparateMonitors(t);
+        return Ok();
+    }
+
+    public Task<Resultado> Bloquear(string? monitor, bool bloquear)
+    {
+        List<PantallaMonitor> tiles;
+        if (monitor is null) tiles = _pantallas.Where(t => !t.Excluded).ToList();
+        else if (FindMonitor(monitor) is { } t) tiles = new() { t };
+        else return NoMonitor();
+        Resultado r = Resultado.Bien;
+        foreach (PantallaMonitor t in tiles)
+        {
+            if (!bloquear) Desbloquear(t);
+            else if (Bloquear(t) is { Ok: false } f) r = f;
+        }
+        return Task.FromResult(r);
+    }
+
+    public Task<Resultado> AbrirPestana(string monitor, int zona, LinkDef enlace)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        Task<Resultado> open = AgregarPestana(t, seg, enlace, quiet: false, activar: true);
+        return Task.FromResult(open.IsCompleted ? open.Result : Resultado.Bien);
+    }
+
+    public Task<Resultado> ActivarPestana(string monitor, int zona, int indice)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        ActivarPestana(t, seg, indice);
+        return Ok();
+    }
+
+    public Task<Resultado> CerrarPestana(string monitor, int zona, int indice)
+    {
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        CerrarPestanaEn(t, seg, indice);
         return Ok();
     }
 
@@ -1216,6 +1743,39 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 NativeMethods.SetWindowPos(Handle, IntPtr.Zero,
                     monitor.X, monitor.Y, monitor.Width, monitor.Height,
                     NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_SHOWWINDOW);
+        }
+
+        private readonly Dictionary<int, BarraPestanas> _barras = new();
+
+        public event Action<int, int>? PestanaActivada;
+        public event Action<int, int>? PestanaCerrada;
+        public event Action<int>? PestanaNueva;
+
+        public void SetBarras(List<(int Zona, Rectangle Area, IReadOnlyList<PestanaVista> Pestanas, int Activa)> barras)
+        {
+            foreach (int z in _barras.Keys.Where(k => barras.All(b => b.Zona != k)).ToList())
+            {
+                _barras[z].Dispose();
+                _barras.Remove(z);
+            }
+            foreach (var b in barras)
+            {
+                if (!_barras.TryGetValue(b.Zona, out BarraPestanas? barra))
+                {
+                    barra = new BarraPestanas(b.Zona);
+                    barra.Activar += (x, i) => PestanaActivada?.Invoke(x.Zona, i);
+                    barra.Cerrar += (x, i) => PestanaCerrada?.Invoke(x.Zona, i);
+                    barra.Nueva += x => PestanaNueva?.Invoke(x.Zona);
+                    Controls.Add(barra);
+                    _barras[b.Zona] = barra;
+                }
+                barra.Actualizar(b.Area, b.Pestanas, b.Activa);
+            }
+        }
+
+        public void BarrasAlFrente()
+        {
+            foreach (BarraPestanas b in _barras.Values) b.AlFrente();
         }
 
         public void SetContents(IEnumerable<string> titles)

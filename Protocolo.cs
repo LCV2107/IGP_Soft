@@ -189,5 +189,5 @@ internal sealed class ListaBlanca
     }
 
     public bool Permite(LayoutProfile perfil) =>
-        perfil.Monitors.SelectMany(m => m.Links).All(z => Permite(z.Url));
+        perfil.Monitors.SelectMany(m => m.Links).All(z => Permite(z.Url) && (z.Pestanas ?? new()).All(p => PestanasWeb.EsWeb(p.Url) && Permite(p.Url)));
 }

@@ -244,6 +244,16 @@ internal sealed class ServidorControl : IDisposable
             case "numeracion_original": return R(await _pantallas.NumeracionOriginal());
             case "combinar": return R(await _pantallas.Combinar(Protocolo.Leer<List<List<string>>>(m, "grupos") ?? new()));
             case "separar": return R(await _pantallas.Separar(Mon()));
+            case "pestana_abrir":
+            {
+                LinkDef? enlace = Protocolo.Leer<LinkDef>(m, "enlace");
+                if (enlace is null || string.IsNullOrWhiteSpace(enlace.Url)) return R(Resultado.Falla("enlace_no_valido"));
+                if (!PestanasWeb.EsWeb(enlace.Url) || !_lista.Permite(enlace.Url)) return R(Resultado.Falla("enlace_no_permitido"));
+                return R(await _pantallas.AbrirPestana(Mon(), Zona(), enlace));
+            }
+            case "pestana_activar": return R(await _pantallas.ActivarPestana(Mon(), Zona(), (int)(Protocolo.Numero(m, "indice") ?? -1)));
+            case "pestana_cerrar": return R(await _pantallas.CerrarPestana(Mon(), Zona(), (int)(Protocolo.Numero(m, "indice") ?? -1)));
+            case "bloquear": return R(await _pantallas.Bloquear(Protocolo.Texto(m, "monitor"), Protocolo.Leer<bool>(m, "valor")));
             case "ampliar": return R(await _pantallas.Ampliar(Mon(), Zona()));
             case "restaurar": return R(await _pantallas.Restaurar(Protocolo.Texto(m, "monitor")));
             case "ampliar_siguiente": return R(await _pantallas.AmpliarSiguiente(Mon(), (int)(Protocolo.Numero(m, "paso") ?? 1)));

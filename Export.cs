@@ -13,7 +13,7 @@ internal static class ProjectFiles
     private const string RuntimesFolder = "runtimes";
 
     private static readonly string[] DataFiles =
-        { "IGP_Soft.enlaces.txt", "IGP_Soft.perfiles.json", "IGP_Soft.config.txt" };
+        { "IGP_Soft.enlaces.txt", "IGP_Soft.perfiles.json", "IGP_Soft.config.txt", GaleriaCarpetas.Archivo };
 
     private static readonly string[] SkippedProgramExtensions = { ".pdb", ".tmp", ".zip", ".borrar" };
 

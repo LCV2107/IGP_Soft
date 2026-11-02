@@ -39,6 +39,29 @@ Descarga la última versión desde [Releases](https://github.com/LCV2107/IGP_Sof
 
 Para cambiarlo, vuelve a hacer clic en el cuadro y elige otro enlace. Para quitarlo, elige **✖ Cerrar esta ventana**.
 
+### El menú de una zona
+
+Al hacer clic en una zona aparece un menú corto. Arriba están las acciones más usadas; lo demás está agrupado en submenús:
+
+| Opción | Qué contiene |
+|--------|--------------|
+| **✖ Cerrar esta ventana** · **⤢ Ampliar a todo el monitor** | Directas, sin submenú. |
+| **☰ Abrir enlace ▸** | La lista de enlaces. Si son muchos, aparecen agrupados en *Páginas web*, *Imágenes*, *Videos*, *Documentos* y *Ventanas*. |
+| **➕ Agregar ▸** | *Archivo o URL…*, *Varios archivos (repartir en el monitor)…* y *Adjuntar ventana abierta*. |
+| **▤ Pestañas ▸** | Solo en zonas con una página web (ver punto 4). |
+| **▢ Zona ▸** | *No usar esta zona* y *Diseñar grilla de este monitor…* |
+| **🖥 Monitor ▸** | *Bloquear proyección*, *Bloquear todos los monitores*, *Omitir esta pantalla*, *Cerrar todo en este monitor* y, si corresponde, *Separar monitores combinados* y *Restablecer numeración*. |
+
+### Bloquear la proyección mientras organizas (candado)
+
+Arriba a la izquierda de cada monitor hay un **🔓 candado**. Haz clic para cerrarlo (**🔒**):
+
+- Todo lo que hagas en ese monitor (abrir, cerrar, cambiar la grilla, usar o no usar zonas, abrir un perfil) se arma **solo en el panel**: la pantalla real sigue mostrando lo de antes.
+- El monitor se marca con borde **ámbar** y la etiqueta **«Sin proyectar»**; las zonas armadas muestran un punto **naranja**.
+- Cuando termines, haz clic otra vez en el candado: **todo aparece de una vez** en la pantalla. Lo que no cambió no se toca (los videos no vuelven a empezar).
+
+Para bloquear o desbloquear **todos** los monitores a la vez: clic en una zona → **🖥 Monitor → Bloquear todos los monitores**. Mientras un monitor está bloqueado no se puede ampliar una zona. El candado se olvida al cerrar IGP_Soft; si sales con monitores bloqueados, se avisa que lo armado sin proyectar se perderá.
+
 Puedes hacer clic y usar normalmente lo que se muestra en cada zona (desplazarte, abrir menús, escribir), pero las ventanas quedan fijas en su lugar: no se pueden mover ni cambiar de tamaño.
 
 Un enlace solo se puede abrir en un lugar a la vez: si ya está abierto, aparece como *(ya abierto)* en los demás monitores.
@@ -63,7 +86,7 @@ Cada zona funciona como una pantalla aparte: haz clic en ella y elige qué mostr
 Para armar zonas de distintos tamaños (por ejemplo, una grande y varias chicas alrededor), abre el **diseñador de grilla**:
 
 - Clic en **⊞** → **⊞ Unir zonas o elegir cuáles usar…**, o
-- Clic en cualquier zona → **▦ Diseñar grilla de este monitor…**
+- Clic en cualquier zona → **▢ Zona → ▦ Diseñar grilla de este monitor…**
 
 En el diseñador:
 
@@ -82,11 +105,11 @@ En el diseñador:
 
 Las zonas en **verde** tienen algo abierto. Al unir zonas, lo que estaba abierto en la zona de **arriba a la izquierda** se queda y se agranda; antes de aplicar, el diseñador te avisa qué se cerraría.
 
-Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. También puedes desactivar una zona directamente: clic en ella → **⊘ No usar esta zona** (y para volver a usarla: clic → **✓ Usar esta zona**).
+Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. También puedes desactivar una zona directamente: clic en ella → **▢ Zona → ⊘ No usar esta zona** (y para volver a usarla: clic → **✓ Usar esta zona**).
 
 ## 4. Mostrar una imagen, un video, un documento u otra página
 
-En el menú de cualquier zona, elige **➕ Elemento personalizado (archivo o URL)…**:
+En el menú de cualquier zona, elige **➕ Agregar → Archivo o URL…**:
 
 1. Elige un archivo de tu PC (imagen, video, PDF, Word o PowerPoint), o pega una dirección web.
 2. Si quieres tenerlo siempre disponible, deja activado *Agregar también a la lista de enlaces*.
@@ -121,12 +144,38 @@ Los documentos de Word (`.docx`) se abren en **Word**, dentro de la zona, en mod
 
 Para Word y PowerPoint, el equipo necesita tener Microsoft Office instalado. Por seguridad, no se abren documentos con macros (`.docm`, `.pptm`) ni los formatos antiguos `.doc` y `.ppt`. Al cerrar la zona se cierra también el documento.
 
+### Varios archivos a la vez
+
+Puedes elegir **varios archivos** y repartirlos en un monitor de una sola vez:
+
+- Clic en una zona → **➕ Agregar → Varios archivos (repartir en el monitor)…**, o elige varios en **Archivo o URL… → Examinar**.
+- **Arrastra** varios archivos desde el Explorador de Windows sobre un monitor del panel (si arrastras uno solo sobre una zona, se abre directamente ahí).
+- En la **Galería**, elige varios y pulsa **Organizar en un monitor…** (ver punto 12).
+
+Se abre la ventana **Organizar en un monitor**:
+
+1. Arriba eliges el **monitor** y la **grilla**. La primera opción es la **recomendada**: la más chica donde entran todos (si la grilla actual alcanza, se queda la actual).
+2. Cada archivo ya aparece en una zona libre. **Arrastra** cada uno a la zona que quieras; si lo sueltas sobre otro, se intercambian.
+3. Lo que no tenga zona queda abajo, en **Sin asignar**, y no se muestra. También puedes arrastrar ahí lo que no quieras mostrar.
+4. Las zonas que ya muestran algo dicen *«Se queda: …»*; si sueltas un archivo encima, dice *«Reemplaza: …»*.
+5. Pulsa **Mostrar**: los archivos se copian a `Assets` y aparecen **todos a la vez** en la pantalla.
+
+### Pestañas en las páginas web
+
+Una zona con una **página web** puede tener hasta **6 pestañas**. Todas ocupan la zona completa (no la dividen) y se ve una a la vez:
+
+1. Pasa el ratón por el **borde izquierdo** de la zona, en la pantalla: se despliega la barra **Pestañas**.
+2. Pulsa **＋ Nueva pestaña**, escribe una dirección (por ejemplo `www.igp.gob.pe`) o elige un enlace web de la lista, y pulsa **Abrir**. Se abre en la misma zona y queda al frente.
+3. Clic en una pestaña de la barra para verla; **✕** la cierra. La barra se oculta sola al quitar el ratón.
+
+Desde el panel, lo mismo está en clic en la zona → **▤ Pestañas**. La zona muestra cuántas pestañas tiene (*«· 3 pestañas»*). Las pestañas solo admiten páginas web: imágenes, videos y documentos se muestran siempre uno por zona. Elegir otro enlace en **☰ Abrir enlace** reemplaza la zona completa, con todas sus pestañas. Los perfiles y la sesión guardan las pestañas de cada zona.
+
 ## 5. Adjuntar una ventana de otra aplicación
 
 Puedes poner en una zona cualquier programa que ya tengas abierto (Excel, un visor, otra aplicación de monitoreo, etc.):
 
 1. Abre primero el programa que quieres mostrar.
-2. En el panel, haz clic en la zona y elige **▣ Adjuntar ventana abierta**.
+2. En el panel, haz clic en la zona y elige **➕ Agregar → ▣ Adjuntar ventana abierta**.
 3. Elige la ventana de la lista. Se coloca sin bordes y se adapta al tamaño de la zona.
 
 Para quitarla, haz clic en la zona y elige **↩ Soltar ventana**: vuelve al escritorio con su tamaño y posición originales. Al salir de IGP_Soft también se devuelven todas; **nunca se cierran**.
@@ -159,7 +208,7 @@ Botones rápidos de la página **Pantallas**:
 | **⟳ Actualizar** | Vuelve a detectar los monitores (se hace solo al conectar o desconectar uno). |
 | **✖ Cerrar todas** | Quita todo lo que se está mostrando. |
 
-Para no usar la laptop como pantalla de monitoreo, activa en **Ajustes** *No usar la pantalla principal*. Para omitir cualquier otro monitor, haz clic en su cuadro y elige **Omitir esta pantalla**.
+Para no usar la laptop como pantalla de monitoreo, activa en **Ajustes** *No usar la pantalla principal*. Para omitir cualquier otro monitor, haz clic en su cuadro y elige **🖥 Monitor → Omitir esta pantalla**.
 
 ### Cambiar el número de los monitores
 
@@ -167,7 +216,7 @@ Los monitores se numeran como los numera Windows. Para cambiarlo, **arrastra un 
 
 El nuevo orden se guarda y se usa en todo: los nombres «Monitor 1 / 2…», **Identificar monitores**, **Abrir en orden**, la galería, los perfiles y los títulos en Alt+Tab. La posición de cada cuadro no cambia (sigue mostrando dónde está físicamente cada pantalla).
 
-Para volver al orden de Windows: clic en una zona → **↺ Restablecer numeración de monitores**.
+Para volver al orden de Windows: clic en una zona → **🖥 Monitor → ↺ Restablecer numeración de monitores**.
 
 ### Combinar monitores en una sola pantalla
 
@@ -179,13 +228,13 @@ Puedes unir **dos o más monitores** para que funcionen como **una sola pantalla
 
 En el panel aparecen como un solo cuadro, **«Monitor N · Combinado (2)»**, y funciona como cualquier otro: lo divides con **⊞**, unes zonas, amplías una zona con los atajos y lo guardas en perfiles. **Identificar monitores** muestra el mismo número en cada pantalla física del grupo.
 
-Para volver a separarlos: clic en una zona → **⊟ Separar monitores combinados** (o **⧉ Combinar monitores → Separar todos**). Los perfiles recuerdan las combinaciones: al abrir un perfil, los monitores se combinan o separan solos según cómo estaban al guardarlo.
+Para volver a separarlos: clic en una zona → **🖥 Monitor → ⊟ Separar monitores combinados** (o **⧉ Combinar monitores → Separar todos**). Los perfiles recuerdan las combinaciones: al abrir un perfil, los monitores se combinan o separan solos según cómo estaban al guardarlo.
 
 > Los monitores combinados deben formar un **rectángulo sin huecos** (por ejemplo 2 lado a lado, 2 uno sobre otro o 4 en 2 × 2) y conviene que tengan la **misma resolución**. Al combinar, se cierra lo que estaba abierto en esos monitores. Si uno se desconecta, los demás vuelven a funcionar por separado hasta que se reconecte.
 
 ### Cerrar solo un monitor
 
-Clic en cualquier zona de ese monitor → **✕ Cerrar todo en este monitor**. Se cierran solo sus zonas; los demás monitores siguen igual. (**✖ Cerrar todas**, arriba, cierra todos los monitores.)
+Clic en cualquier zona de ese monitor → **🖥 Monitor → ✕ Cerrar todo en este monitor**. Se cierran solo sus zonas; los demás monitores siguen igual. (**✖ Cerrar todas**, arriba, cierra todos los monitores.)
 
 ## 7. Editar la lista de enlaces
 
@@ -285,18 +334,29 @@ Si algún enlace apunta a una imagen o video que todavía está fuera de `Assets
 
 En la página **▤ Galería** ves todo lo que hay en la carpeta `Assets` con su miniatura (imágenes y videos).
 
-- **➕ Agregar archivos…**: elige imágenes, videos o documentos de tu PC; se copian a `Assets`. También puedes **arrastrarlos** a la galería.
-- **Buscar** por nombre y **filtrar** por Imágenes, Videos u Otros.
+- **➕ Agregar archivos…**: elige imágenes, videos o documentos de tu PC; se copian a `Assets`. También puedes **arrastrarlos** a la galería. Si tienes una carpeta elegida, lo agregado entra en esa carpeta.
+- **Buscar** por nombre y **filtrar** por Imágenes, Videos o Documentos y otros.
 - Al elegir un elemento ves su **vista previa** grande, su tamaño, la fecha y si se usa en algún enlace o perfil. Los que están en uso aparecen en **verde**.
+- Para elegir **varios**, usa **Ctrl** o **Mayús** (o **Ctrl + A** para todos).
 
-Con el elemento elegido puedes:
+### Carpetas
+
+A la izquierda está la lista de **Carpetas**: *Todos*, *Sin carpeta*, las tuyas y, si llegaron archivos desde otro equipo, *Recibidos del otro equipo*.
+
+- **＋ Nueva carpeta** crea una. Con clic derecho sobre una carpeta puedes **renombrarla** o **eliminarla** (sus archivos no se borran: pasan a *Sin carpeta*).
+- Para **mover** archivos, arrástralos sobre una carpeta, o usa **Mover a carpeta ▾** (también con clic derecho sobre los archivos).
+- Las carpetas son propias de IGP_Soft: los archivos no se mueven en el disco, así que los enlaces y perfiles que los usan siguen funcionando.
+
+Con los elementos elegidos puedes:
 
 | Botón | Qué hace |
 |-------|----------|
-| **Mostrar en una zona ▾** | Elige el monitor y la zona: se abre ahí al instante. |
+| **Organizar en un monitor…** | Abre la ventana para repartirlos en las zonas de un monitor (ver punto 4, *Varios archivos a la vez*). |
+| **Mostrar en una zona ▾** | Con uno solo: elige el monitor y la zona y se abre ahí al instante. |
+| **Mover a carpeta ▾** | Los pasa a otra carpeta o a *Sin carpeta*. |
 | **Agregar a la lista de enlaces** | Lo suma a la lista, para usarlo desde cualquier zona o con **Abrir en orden**. |
 | **Abrir con el reproductor / visor** | Lo abre con el programa de Windows (útil para ver un video completo). También con doble clic. |
-| **Eliminar de Assets** | Lo borra. Si se usa en enlaces o perfiles, te avisa antes. |
+| **Eliminar de Assets** | Los borra (también con la tecla **Supr**). Si se usan en enlaces o perfiles, te avisa antes. |
 
 ## 13. Ampliar una zona a todo el monitor (atajos de teclado)
 
@@ -325,7 +385,7 @@ En el panel, la zona ampliada se marca con la etiqueta amarilla **«Ampliada al 
 2. Pulsa la nueva combinación. Debe incluir **Ctrl** o **Alt**.
 3. Se guarda al instante. Con **Retroceso** lo dejas *Sin asignar*; con **Esc** cancelas.
 
-También puedes asignar atajos a **Abrir en orden**, **Cerrar todas las ventanas** y **Cerrar todo en el monitor bajo el mouse** (vienen sin asignar). Si la combinación ya la usa otra acción, el programa pregunta si quieres pasársela; si la usa otro programa de Windows, aparece en rojo como **Ocupado**. **↺ Restaurar atajos predeterminados** vuelve a los de la tabla.
+También puedes asignar atajos a **Abrir en orden**, **Cerrar todas las ventanas**, **Cerrar todo en el monitor bajo el mouse**, **Bloquear o desbloquear el monitor bajo el mouse** y **Bloquear o desbloquear todos los monitores** (vienen sin asignar). Si la combinación ya la usa otra acción, el programa pregunta si quieres pasársela; si la usa otro programa de Windows, aparece en rojo como **Ocupado**. **↺ Restaurar atajos predeterminados** vuelve a los de la tabla.
 
 > En teclados en español, `Ctrl + Alt` funciona como `AltGr`. Evita combinaciones con letras o números que escriben símbolos (por ejemplo `AltGr + Q` escribe **@**), porque dejarían de escribirse.
 
@@ -336,7 +396,8 @@ IGP_Soft está pensado para muchas pantallas abiertas a la vez sin agotar la mem
 - **Un solo navegador para todas las zonas.** Cada zona es una ventana del mismo navegador, en lugar de un navegador completo por zona. Si cierras una zona, las demás siguen funcionando.
 - **Navegador «liviano».** Se desactivan servicios que no hacen falta para mostrar pantallas (telemetría, sincronización, actualizaciones de componentes, precarga de páginas) y se limita la cantidad de procesos internos.
 - **Imágenes y PDF sin navegador.** Las imágenes de tu PC (JPG, PNG, GIF, BMP) y los PDF se muestran directamente en IGP_Soft, sin abrir un navegador. Los videos y las páginas web siguen usando el navegador.
-- **Lo que no se ve, no trabaja.** Cuando amplías una zona (punto 13), las de detrás se ocultan y el navegador deja de dibujarlas hasta que vuelves a la grilla.
+- **Lo que no se ve, no trabaja.** Cuando amplías una zona (punto 13), las de detrás se ocultan y el navegador deja de dibujarlas hasta que vuelves a la grilla. Lo mismo pasa con las pestañas que no están al frente: siguen cargadas, pero no consumen al dibujar.
+- **Videos vigilados.** Si un video pierde muchos cuadros (va a tirones), IGP_Soft lo anota en el archivo `IGP_Soft.diagnostico.log`, con el monitor, la zona y el tamaño del video. Sirve para saber en qué equipo y con qué video ocurre.
 
 En la página **Pantallas**, el chip **Memoria navegador** muestra cuánta RAM usan las pantallas en este momento (también aparece en la tarjeta de estado del menú). Se pone **amarillo** si pasa de la mitad de la RAM del equipo.
 
@@ -384,12 +445,14 @@ Desde LCVDesk puedes manejar las pantallas de otro PC con IGP_Soft como si estuv
 
 Mientras alguien lo maneja a distancia, el panel del otro equipo muestra **«Controlado desde [equipo]»** y queda bloqueado. Se libera solo al terminar la conexión.
 
+A distancia también funcionan el **candado** de cada monitor, las **pestañas** de las páginas web (desde **▤ Pestañas** en el menú de la zona) y **Organizar en un monitor**. Los avisos (por ejemplo, *«El enlace ya está abierto en otra zona»*) aparecen en **tu** panel, abajo a la derecha, y no en las pantallas del otro equipo.
+
 ### Enviar imágenes, videos y documentos al otro equipo
 
 Desde el panel remoto puedes usar archivos de **tu** equipo en las pantallas del otro:
 
 - **Galería → Enviar a la reserva…** (o arrastra los archivos a la Galería): los copia al otro equipo sin abrirlos todavía. Así los tienes listos para cuando los necesites.
-- **Elemento personalizado** en una zona, con un archivo de tu equipo: lo copia y lo abre en esa zona. Mientras se copia, la zona muestra *«Copiando al otro equipo… 45 %»*.
+- **➕ Agregar → Archivo o URL…** en una zona, con un archivo de tu equipo: lo copia y lo abre en esa zona. Con **Varios archivos** o con **Organizar en un monitor**, copia cada uno y los muestra todos juntos al final. Mientras se copia, la zona muestra *«Copiando al otro equipo… 45 %»*.
 - **Enlaces → Archivo de este equipo**: lo copia y lo agrega a la lista de enlaces del otro equipo.
 
 Cada archivo se copia **una sola vez**. Si el otro equipo ya lo tiene, se usa al instante, y los perfiles que lo usan se abren sin volver a copiar nada, aunque no haya conexión. Si la copia se corta, al volver a enviarlo sigue desde donde quedó. Con **Cancelar** se detiene y no queda nada a medias.
@@ -416,6 +479,7 @@ Para pasar tus datos de una forma a la otra, usa **⇪ Exportar y copias → Cop
 | `IGP_Soft.enlaces.txt` | La lista de enlaces |
 | `IGP_Soft.perfiles.json` | Los perfiles guardados |
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
+| `IGP_Soft.galeria.json` | Las carpetas de la galería |
 | `Assets\` | Imágenes, videos y documentos que agregaste |
 | `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |
 | `Copias de seguridad\` | Copias automáticas hechas antes de restaurar o actualizar |

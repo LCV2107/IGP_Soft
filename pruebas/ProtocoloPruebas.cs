@@ -49,6 +49,10 @@ internal sealed class PantallasFalsas : IPantallas
     public Task<Resultado> NumeracionOriginal() => Ok("numeracion");
     public Task<Resultado> Combinar(List<List<string>> grupos) => Ok($"combinar {string.Join(";", grupos.Select(g => string.Join("+", g)))}");
     public Task<Resultado> Separar(string monitor) => Ok($"separar {monitor}");
+    public Task<Resultado> Bloquear(string? monitor, bool bloquear) => Ok($"bloquear {monitor ?? "todos"} {bloquear}");
+    public Task<Resultado> AbrirPestana(string monitor, int zona, LinkDef enlace) => Ok($"pestana {monitor} {zona} {enlace.Url}");
+    public Task<Resultado> ActivarPestana(string monitor, int zona, int indice) => Ok($"activar {monitor} {zona} {indice}");
+    public Task<Resultado> CerrarPestana(string monitor, int zona, int indice) => Ok($"cerrar_pestana {monitor} {zona} {indice}");
     public Task<Resultado> Ampliar(string monitor, int zona) => Ok($"ampliar {monitor} {zona}");
     public Task<Resultado> Restaurar(string? monitor) => Ok($"restaurar {monitor ?? "todos"}");
     public Task<Resultado> AmpliarSiguiente(string monitor, int paso) => Ok($"siguiente {monitor} {paso}");
@@ -136,6 +140,12 @@ public sealed class ProtocoloPruebas : IDisposable
         Assert.True((await c.Combinar(new() { new() { "MON-A-1", "MON-B-2" } })).Ok);
         Assert.True((await c.Restaurar(null)).Ok);
         Assert.True((await c.AbrirEnOrden()).Ok);
+        Assert.True((await c.Bloquear("MON-A-1", true)).Ok);
+        Assert.True((await c.Bloquear(null, false)).Ok);
+        Assert.True((await c.AbrirPestana("MON-A-1", 0, new LinkDef("IGP", "https://www.igp.gob.pe"))).Ok);
+        Assert.True((await c.ActivarPestana("MON-A-1", 0, 1)).Ok);
+        Assert.True((await c.CerrarPestana("MON-A-1", 0, 1)).Ok);
+        Assert.Equal("enlace_no_permitido", (await c.AbrirPestana("MON-A-1", 0, new LinkDef("x", "ventana:cmd|x"))).Codigo);
         Assert.Single(await c.VentanasAbiertas());
         Assert.Equal(new byte[] { 1, 2, 3 }, await c.VistaPrevia("MON-A-1", 240));
         Assert.Contains("abrir MON-A-1 0 https://ultimosismo.igp.gob.pe/ultimo-sismo", _falsas.Llamadas);
@@ -143,6 +153,12 @@ public sealed class ProtocoloPruebas : IDisposable
         Assert.Contains("combinar MON-A-1+MON-B-2", _falsas.Llamadas);
         Assert.Contains("restaurar todos", _falsas.Llamadas);
         Assert.Contains("en_orden", _falsas.Llamadas);
+        Assert.Contains("bloquear MON-A-1 True", _falsas.Llamadas);
+        Assert.Contains("bloquear todos False", _falsas.Llamadas);
+        Assert.Contains("pestana MON-A-1 0 https://www.igp.gob.pe", _falsas.Llamadas);
+        Assert.Contains("activar MON-A-1 0 1", _falsas.Llamadas);
+        Assert.Contains("cerrar_pestana MON-A-1 0 1", _falsas.Llamadas);
+        Assert.DoesNotContain(_falsas.Llamadas, l => l.Contains("ventana:cmd"));
     }
 
     [Theory]

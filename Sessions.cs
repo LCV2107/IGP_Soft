@@ -9,6 +9,8 @@ internal sealed class ZoneLayout
     public int Zone { get; set; }
     public string Titulo { get; set; } = "";
     public string Url { get; set; } = "";
+    public List<LinkDef>? Pestanas { get; set; }
+    public int Activa { get; set; }
 }
 
 internal sealed class MonitorLayout
