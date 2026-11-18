@@ -321,6 +321,54 @@ internal static class Profiles
         try { if (Directory.Exists(KeepRoot)) Directory.Delete(KeepRoot, recursive: true); }
         catch { }
     }
+
+    public static string TipoDe(string dir) =>
+        IsKept(dir) ? "conservado" : Path.GetFileName(dir).StartsWith("compartido_", StringComparison.OrdinalIgnoreCase) ? "compartido" : "propio";
+
+    public static string AjustarLocalState(string? json, bool aceleracion)
+    {
+        System.Text.Json.Nodes.JsonObject raiz;
+        try { raiz = System.Text.Json.Nodes.JsonNode.Parse(json ?? "") as System.Text.Json.Nodes.JsonObject ?? new(); }
+        catch { raiz = new(); }
+        if (raiz["hardware_acceleration_mode"] is not System.Text.Json.Nodes.JsonObject modo)
+        {
+            modo = new System.Text.Json.Nodes.JsonObject();
+            raiz["hardware_acceleration_mode"] = modo;
+        }
+        modo["enabled"] = aceleracion;
+        return raiz.ToJsonString();
+    }
+
+    public static bool? AceleracionDelPerfil(string? json)
+    {
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(json ?? "")?["hardware_acceleration_mode"]?["enabled"]?.GetValue<bool>();
+        }
+        catch { return null; }
+    }
+
+    public static string? LeerLocalState(string dir)
+    {
+        try
+        {
+            string ruta = Path.Combine(dir, "Local State");
+            return File.Exists(ruta) ? File.ReadAllText(ruta) : null;
+        }
+        catch { return null; }
+    }
+
+    public static void FijarAceleracion(string dir, bool aceleracion)
+    {
+        try
+        {
+            string ruta = Path.Combine(dir, "Local State");
+            string? actual = LeerLocalState(dir);
+            if (AceleracionDelPerfil(actual) == aceleracion) return;
+            File.WriteAllText(ruta, AjustarLocalState(actual, aceleracion), new UTF8Encoding(false));
+        }
+        catch (Exception ex) { Diagnostico.Log($"No se pudo fijar la aceleración en el perfil {TipoDe(dir)}: {ex.Message}"); }
+    }
 }
 
 internal sealed class LaunchedWindow
@@ -347,6 +395,11 @@ internal sealed class LaunchedWindow
     public int StyleFixes;
     public bool ReportedHung;
     public DateTime VideoRevisado;
+    public DateTime Abierta = DateTime.Now;
+    public bool VideoConfirmado;
+    public bool NavegadorYaAbierto { get; init; }
+    public bool? AceleracionEnPerfil { get; init; }
+    public bool SinGpu { get; init; }
     public readonly object AreaGate = new();
     public Rectangle PendingArea;
     public bool AreaDirty;
@@ -481,8 +534,12 @@ internal static class MediaWrapper
         $('avance').onchange=()=>{arrastrando=false};
         v.onclick=alternar;
         ['play','pause','volumechange','ratechange','timeupdate','durationchange','loadedmetadata'].forEach(n=>v.addEventListener(n,()=>{if(!document.body.classList.contains('quieto'))pintar()}));
-        let cuadros=0,perdidos=0;
-        setInterval(()=>{if(!v.getVideoPlaybackQuality)return;const q=v.getVideoPlaybackQuality(),c=q.totalVideoFrames-cuadros,p=q.droppedVideoFrames-perdidos;cuadros=q.totalVideoFrames;perdidos=q.droppedVideoFrames;document.title=v.paused||document.visibilityState!=='visible'?'IGP_Soft':'IGP_Soft · '+c+' cuadros · '+p+' perdidos · '+v.videoWidth+'x'+v.videoHeight},10000);
+        let cuadros=0,perdidos=0,ultimo=performance.now();
+        const informar=()=>{const ahora=performance.now(),q=v.getVideoPlaybackQuality?v.getVideoPlaybackQuality():{totalVideoFrames:0,droppedVideoFrames:0},s=(ahora-ultimo)/1000;
+        const c=Math.round((q.totalVideoFrames-cuadros)*10/Math.max(s,0.5)),p=Math.round((q.droppedVideoFrames-perdidos)*10/Math.max(s,0.5));cuadros=q.totalVideoFrames;perdidos=q.droppedVideoFrames;ultimo=ahora;
+        const fin=' · total '+q.totalVideoFrames+' · estado '+v.readyState+'/'+v.networkState+' · error '+(v.error?v.error.code:0);
+        document.title=document.visibilityState!=='visible'?'IGP_Soft · oculto'+fin:v.paused&&!v.error?'IGP_Soft · pausado'+fin:'IGP_Soft · '+c+' cuadros · '+p+' perdidos · '+v.videoWidth+'x'+v.videoHeight+fin};
+        let rapido=0;const arranque=setInterval(()=>{informar();if(++rapido>=10){clearInterval(arranque);setInterval(informar,10000)}},2000);
         document.addEventListener('mousemove',mostrar);
         document.addEventListener('keydown',e=>{const k=e.key;let hecho=true;
         if(k===' '||k==='k'||k==='K')alternar();
@@ -527,6 +584,9 @@ internal static class WindowManager
             string profileDir = Profiles.SharedDir(browser.Name, keepData) ?? Profiles.NewDir(tag);
             bool running = HasLiveWindows(profileDir);
             if (!running) KillProfileProcesses(browser.ProcessName, profileDir);
+            bool sinGpu = !Profiles.HardwareAcceleration;
+            if (browser.Family == BrowserFamily.Chromium && !running) Profiles.FijarAceleracion(profileDir, !sinGpu);
+            bool? aceleracionPerfil = browser.Family == BrowserFamily.Chromium ? Profiles.AceleracionDelPerfil(Profiles.LeerLocalState(profileDir)) : null;
             url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
             var before = SnapshotWindows(browser.ProcessName);
 
@@ -555,7 +615,9 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--disable-session-crashed-bubble");
                 psi.ArgumentList.Add("--hide-crash-restore-bubble");
                 psi.ArgumentList.Add("--disable-infobars");
-                psi.ArgumentList.Add("--disable-features=Translate,IsolateOrigins,site-per-process,MediaRouter,OptimizationHints,AutofillServerCommunication");
+                psi.ArgumentList.Add("--disable-features=Translate,IsolateOrigins,site-per-process,MediaRouter,OptimizationHints,AutofillServerCommunication,CalculateNativeWinOcclusion");
+                psi.ArgumentList.Add("--disable-backgrounding-occluded-windows");
+                psi.ArgumentList.Add("--disable-direct-composition-video-overlays");
                 psi.ArgumentList.Add("--renderer-process-limit=4");
                 psi.ArgumentList.Add("--disable-extensions");
                 psi.ArgumentList.Add("--disable-component-update");
@@ -568,7 +630,7 @@ internal static class WindowManager
                 psi.ArgumentList.Add("--disable-component-extensions-with-background-pages");
                 psi.ArgumentList.Add("--no-pings");
                 psi.ArgumentList.Add("--metrics-recording-only");
-                if (!Profiles.HardwareAcceleration) psi.ArgumentList.Add("--disable-gpu");
+                if (sinGpu) psi.ArgumentList.Add("--disable-gpu");
                 psi.ArgumentList.Add("--disable-search-engine-choice-screen");
                 psi.ArgumentList.Add("--autoplay-policy=no-user-gesture-required");
                 psi.ArgumentList.Add($"--window-position={onScreen.X},{onScreen.Y}");
@@ -640,6 +702,7 @@ internal static class WindowManager
                 ProcessId = pid, Hwnd = hwnd, ProfileDir = profileDir,
                 ProcessName = browser.ProcessName, Borderless = borderless,
                 ParentHwnd = parentHwnd, DesiredArea = area,
+                NavegadorYaAbierto = running, AceleracionEnPerfil = aceleracionPerfil, SinGpu = sinGpu,
             };
             lock (SharedWindows) SharedWindows.Add(win);
 
@@ -1431,6 +1494,21 @@ internal static class MonitorEnumerator
             return HardwareIdFromInterface(dd.DeviceID);
         }
         catch { return ""; }
+    }
+
+    public static string TarjetaDe(string deviceName)
+    {
+        try
+        {
+            for (uint i = 0; i < 32; i++)
+            {
+                var dd = new NativeMethods.DISPLAY_DEVICE { cb = Marshal.SizeOf<NativeMethods.DISPLAY_DEVICE>() };
+                if (!NativeMethods.EnumDisplayDevices(null, i, ref dd, 0)) break;
+                if (string.Equals(dd.DeviceName, deviceName, StringComparison.OrdinalIgnoreCase)) return dd.DeviceString;
+            }
+        }
+        catch { }
+        return "desconocida";
     }
 
     public static string HardwareIdFromInterface(string? path)

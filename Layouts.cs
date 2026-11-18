@@ -101,6 +101,39 @@ internal sealed class GridLayout
         return result;
     }
 
+    public static IReadOnlyList<(int Cols, int Rows)> Divisiones { get; } = new[]
+    {
+        (1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (3, 2), (2, 3), (3, 3), (4, 2), (4, 3), (4, 4),
+    };
+
+    public static (int Cols, int Rows)? CuadriculaDeMiembros(IReadOnlyList<Rectangle> miembros)
+    {
+        if (miembros.Count < 2) return null;
+        Size tam = miembros[0].Size;
+        if (tam.Width <= 0 || tam.Height <= 0 || miembros.Any(m => m.Size != tam)) return null;
+        int x0 = miembros.Min(m => m.X), y0 = miembros.Min(m => m.Y);
+        var celdas = new HashSet<(int, int)>();
+        foreach (Rectangle m in miembros)
+        {
+            if ((m.X - x0) % tam.Width != 0 || (m.Y - y0) % tam.Height != 0) return null;
+            if (!celdas.Add(((m.X - x0) / tam.Width, (m.Y - y0) / tam.Height))) return null;
+        }
+        int cols = celdas.Max(c => c.Item1) + 1, rows = celdas.Max(c => c.Item2) + 1;
+        return cols * rows == miembros.Count ? (cols, rows) : null;
+    }
+
+    public static IReadOnlyList<(string Name, int Cols, int Rows)> AtajosDeGrupo(IReadOnlyList<Rectangle> miembros)
+    {
+        var atajos = new List<(string, int, int)>();
+        if (CuadriculaDeMiembros(miembros) is not var (cols, rows)) return atajos;
+        if (cols <= Max && rows <= Max) atajos.Add(("Una zona por monitor", cols, rows));
+        bool horizontal = miembros[0].Width >= miembros[0].Height;
+        (int c2, int r2) = horizontal ? (cols * 2, rows) : (cols, rows * 2);
+        if (c2 > Max || r2 > Max) (c2, r2) = horizontal ? (cols, rows * 2) : (cols * 2, rows);
+        if (c2 <= Max && r2 <= Max) atajos.Add(("2 por monitor", c2, r2));
+        return atajos;
+    }
+
     public static IReadOnlyList<(string Name, GridLayout Layout)> Presets { get; } = new List<(string, GridLayout)>
     {
         ("Grande a la izquierda + 2", TryCreate(2, 2, new[] { new ZoneSpec(0, 0, 1, 2), new ZoneSpec(1, 0), new ZoneSpec(1, 1) })!),

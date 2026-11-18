@@ -63,8 +63,18 @@ internal static class Program
         SynchronizationContext ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         using (var servidor = ServidorControl.ParaEsteEquipo(pantallas, ui))
         {
-            servidor.Conectado += equipo => ui.Post(_ => form.SetControlador(equipo), null);
-            servidor.Desconectado += () => ui.Post(_ => form.SetControlador(null), null);
+            servidor.Conectado += equipo =>
+            {
+                Diagnostico.Controlador = equipo;
+                Diagnostico.Log($"IGPDesk: conectado el equipo {equipo}");
+                ui.Post(_ => form.SetControlador(equipo), null);
+            };
+            servidor.Desconectado += () =>
+            {
+                Diagnostico.Controlador = null;
+                Diagnostico.Log("IGPDesk: se desconectó el equipo que controla");
+                ui.Post(_ => form.SetControlador(null), null);
+            };
             servidor.Iniciar();
             Application.Run(form);
         }

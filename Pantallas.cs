@@ -111,9 +111,14 @@ internal sealed record EstadoZona(int Zona, string Estado, string? Titulo, strin
     [JsonIgnore] public bool Ocupada => Estado is EstadosZona.Abriendo or EstadosZona.EnPantalla || Url is not null;
 }
 
+internal sealed record LecturaVideo(bool Oculto, bool Pausado, long Total, int ReadyState, int NetworkState, int Error);
+
+internal sealed record AreaMiembro(int X, int Y, int Ancho, int Alto);
+
 internal sealed record EstadoMonitor(
     string Id, string Dispositivo, int Numero, int X, int Y, int Ancho, int Alto, bool Principal, int Miembros, bool Omitido,
-    int Columnas, int Filas, IReadOnlyList<ZoneSpec> Grilla, int? Ampliada, IReadOnlyList<EstadoZona> Zonas, bool Bloqueado = false)
+    int Columnas, int Filas, IReadOnlyList<ZoneSpec> Grilla, int? Ampliada, IReadOnlyList<EstadoZona> Zonas, bool Bloqueado = false,
+    IReadOnlyList<AreaMiembro>? AreasMiembros = null)
 {
     [JsonIgnore] public bool Combinado => Miembros > 1;
 
@@ -137,7 +142,10 @@ internal sealed record EstadoPantallas(
         p.Maximized?.Index,
         p.Segments.Select(s => new EstadoZona(s.Index, EstadoDe(p, s), s.Link?.Titulo, s.Link?.Url, s.Launched is { Attached: true, AlCerrar: null },
             s.Area.X, s.Area.Y, s.Area.Width, s.Area.Height,
-            s.Pestanas.Count > 0 ? s.Pestanas.Select(t => t.Link).ToList() : null, s.Activa)).ToList(), p.Bloqueado);
+            s.Pestanas.Count > 0 ? s.Pestanas.Select(t => t.Link).ToList() : null, s.Activa)).ToList(), p.Bloqueado,
+        p.Monitor.Members is { Count: > 1 } miembros
+            ? miembros.Select(m => new AreaMiembro(m.X - p.Monitor.X, m.Y - p.Monitor.Y, m.Width, m.Height)).ToList()
+            : null);
 
     private static string EstadoDe(PantallaMonitor p, Segment s) =>
         s.Disabled ? EstadosZona.Desactivada

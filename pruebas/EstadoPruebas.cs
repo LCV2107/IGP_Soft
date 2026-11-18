@@ -54,6 +54,27 @@ public class EstadoPruebas
     }
 
     [Fact]
+    public void Un_grupo_combinado_lleva_las_areas_de_sus_monitores_relativas_al_grupo()
+    {
+        var miembros = new[]
+        {
+            new MonitorInfo(@"\\.\DISPLAY2", 1920, 0, 1920, 1080, false) { HardwareId = "MON-B" },
+            new MonitorInfo(@"\\.\DISPLAY3", 3840, 0, 1920, 1080, false) { HardwareId = "MON-C" },
+        };
+        var grupo = new PantallaMonitor(2, new MonitorInfo(@"\\.\DISPLAY2+\\.\DISPLAY3", 1920, 0, 3840, 1080, false)
+        {
+            Members = miembros, HardwareId = "grupo:MON-B+MON-C",
+        });
+        grupo.Apply(GridLayout.Uniform(2, 1));
+
+        string json = JsonSerializer.Serialize(Estado(Monitor(@"\\.\DISPLAY1", 1, 0), grupo), Protocolo.Json);
+        EstadoPantallas leido = JsonSerializer.Deserialize<EstadoPantallas>(json, Protocolo.Json)!;
+
+        Assert.Null(leido.Monitores[0].AreasMiembros);
+        Assert.Equal(new[] { new AreaMiembro(0, 0, 1920, 1080), new AreaMiembro(1920, 0, 1920, 1080) }, leido.Monitores[1].AreasMiembros);
+    }
+
+    [Fact]
     public void El_estado_se_convierte_en_perfil_con_identificador_de_hardware()
     {
         PantallaMonitor a = Monitor(@"\\.\DISPLAY1", 1, 0);

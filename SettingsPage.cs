@@ -53,7 +53,16 @@ internal sealed class SettingsPage : Page
         flow.Controls.Add(Section("⌨", "Atajos de teclado",
             "Funcionan desde cualquier programa. Actúan sobre la zona que está bajo el mouse.", hotkeyRows.ToArray()));
 
-        _chkGpu.CheckedChanged += (_, _) => { if (!_loading) Profiles.HardwareAcceleration = _chkGpu.Checked; };
+        _chkGpu.CheckedChanged += (_, _) =>
+        {
+            if (_loading) return;
+            Profiles.HardwareAcceleration = _chkGpu.Checked;
+            if (WindowManager.BrowserRootPids().Count == 0) return;
+            if (MessageBox.Show(this,
+                    "El navegador que muestra las pantallas sigue con el ajuste anterior hasta que se vuelva a abrir.\n\n¿Reabrir ahora las páginas abiertas?",
+                    "Aceleración por hardware", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                reloadNow();
+        };
         _cboReload.DropDownStyle = ComboBoxStyle.DropDownList;
         _cboReload.FlatStyle = FlatStyle.Flat;
         _cboReload.Font = Theme.Body;
@@ -65,14 +74,21 @@ internal sealed class SettingsPage : Page
         };
         ModernButton reloadButton = ToolButton("⟳  Recargar todo ahora", reloadNow);
         reloadButton.Margin = new Padding(0, 6, 0, 0);
+        ModernButton diagnostico = ToolButton("▤  Abrir el diagnóstico", () =>
+        {
+            if (!File.Exists(Diagnostico.FilePath)) Diagnostico.Log("Diagnóstico abierto desde Ajustes");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{Diagnostico.FilePath}\"") { UseShellExecute = true });
+        });
+        diagnostico.Kind = ButtonKind.Ghost;
+        diagnostico.Margin = new Padding(0, 6, 0, 0);
         var gpuNote = new Label
         {
-            Text = "Desactívala solo si la tarjeta de video es débil o da problemas. Se aplica al volver a abrir las pantallas.",
+            Text = "Desactívala solo si la tarjeta de video es débil o da problemas. Al cambiarla se ofrece reabrir las páginas.",
             AutoSize = false, Size = new Size(560, 22), ForeColor = Theme.TextMuted, Font = Theme.Small, Margin = new Padding(52, 0, 0, 6),
         };
         flow.Controls.Add(Section("⚡", "Rendimiento",
             "Todas las zonas comparten un solo navegador para usar menos memoria. Recargar libera la memoria acumulada.",
-            Toggle(_chkGpu), gpuNote, Row("Recargar", _cboReload), reloadButton));
+            Toggle(_chkGpu), gpuNote, Row("Recargar", _cboReload), reloadButton, diagnostico));
 
         _cboStartup.DropDownStyle = ComboBoxStyle.DropDownList;
         _cboStartup.FlatStyle = FlatStyle.Flat;
@@ -128,7 +144,7 @@ internal sealed class SettingsPage : Page
         });
         received.Margin = new Padding(0, 6, 0, 0);
         flow.Controls.Add(Section("⇄", "Control remoto",
-            "Cuando otro equipo maneja este con LCVDesk, puede enviar imágenes, videos, PDF y documentos de Word o PowerPoint. Se guardan en Assets\\Remoto y no se borran solos.",
+            "Cuando otro equipo maneja este con IGPDesk, puede enviar imágenes, videos, PDF y documentos de Word o PowerPoint. Se guardan en Assets\\Remoto y no se borran solos.",
             Row("Tamaño máximo", _cboLimit), received));
 
         _restartForUpdate = restartForUpdate;

@@ -81,18 +81,19 @@ Puedes elegir cualquier combinación, desde **1 × 1** (pantalla completa) hasta
 
 Cada zona funciona como una pantalla aparte: haz clic en ella y elige qué mostrar. La grilla de cada monitor se guarda en los perfiles.
 
-### Unir zonas y elegir cuáles usar
+### Diseñador de grilla: divisiones de un clic y vista previa
 
-Para armar zonas de distintos tamaños (por ejemplo, una grande y varias chicas alrededor), abre el **diseñador de grilla**:
+Para ver cómo quedará antes de cambiar las pantallas, o para armar zonas de distintos tamaños, abre el **diseñador de grilla**:
 
-- Clic en **⊞** → **⊞ Unir zonas o elegir cuáles usar…**, o
+- Clic en **⊞** → **▦ Más divisiones y vista previa…**, o
 - Clic en cualquier zona → **▢ Zona → ▦ Diseñar grilla de este monitor…**
 
-En el diseñador:
+En el diseñador **nada cambia en las pantallas hasta que pulsas Aplicar**. El lienzo muestra cómo quedará el monitor: en verde las zonas que conservan lo que tienen abierto y, a la derecha, lo que se cerraría.
 
-1. Elige **Columnas** y **Filas** (hasta 4 × 4), o una **distribución** lista con un clic: *Grande a la izquierda + 2*, *Grande arriba + 3*, *Grande + 3*, *Grande + 5*, *Grande + 7*.
-2. **Arrastra el mouse** sobre las celdas para seleccionarlas (se marcan en amarillo), o haz clic en una zona.
-3. Usa los botones:
+1. **Dividir en:** un clic en el dibujo de la división que quieres: *1×1*, *2×1*, *1×2*, *2×2*, *3×1*, *3×2*, *2×3*, *3×3*, *4×2*, *4×3* o *4×4*. Al pasar el mouse por encima, el lienzo la muestra en amarillo sobre la actual. La división elegida queda marcada en azul.
+2. **Videowall:** si el monitor es un grupo de monitores combinados del mismo tamaño, aparecen además **Una zona por monitor** (por ejemplo, un videowall de 3 × 2 monitores queda en 3 × 2) y **2 por monitor**. El lienzo dibuja con una línea discontinua dónde termina cada monitor, para ver si una zona quedaría cortada por el marco.
+3. **Modelos:** distribuciones con una zona grande: *Grande a la izquierda + 2*, *Grande arriba + 3*, *Grande + 3*, *Grande + 5*, *Grande + 7*. También puedes escribir **Columnas** y **Filas** (hasta 4 × 4).
+4. Para retocar, **arrastra el mouse** sobre las celdas para seleccionarlas (se marcan en amarillo), o haz clic en una zona, y usa los botones:
 
 | Botón | Qué hace |
 |-------|----------|
@@ -101,7 +102,7 @@ En el diseñador:
 | **⊘ No usar estas zonas** | Deja esas zonas vacías (se ven rayadas). Vuelve a pulsarlo para usarlas otra vez. |
 | **↺ Restablecer cuadrícula** | Deshace las uniones y vuelve a la cuadrícula simple. |
 
-4. Pulsa **Aplicar**.
+5. Pulsa **Aplicar**, o **Cancelar** (o `Esc`) para dejar todo como estaba.
 
 Las zonas en **verde** tienen algo abierto. Al unir zonas, lo que estaba abierto en la zona de **arriba a la izquierda** se queda y se agranda; antes de aplicar, el diseñador te avisa qué se cerraría.
 
@@ -397,7 +398,10 @@ IGP_Soft está pensado para muchas pantallas abiertas a la vez sin agotar la mem
 - **Navegador «liviano».** Se desactivan servicios que no hacen falta para mostrar pantallas (telemetría, sincronización, actualizaciones de componentes, precarga de páginas) y se limita la cantidad de procesos internos.
 - **Imágenes y PDF sin navegador.** Las imágenes de tu PC (JPG, PNG, GIF, BMP) y los PDF se muestran directamente en IGP_Soft, sin abrir un navegador. Los videos y las páginas web siguen usando el navegador.
 - **Lo que no se ve, no trabaja.** Cuando amplías una zona (punto 13), las de detrás se ocultan y el navegador deja de dibujarlas hasta que vuelves a la grilla. Lo mismo pasa con las pestañas que no están al frente: siguen cargadas, pero no consumen al dibujar.
-- **Videos vigilados.** Si un video pierde muchos cuadros (va a tirones), IGP_Soft lo anota en el archivo `IGP_Soft.diagnostico.log`, con el monitor, la zona y el tamaño del video. Sirve para saber en qué equipo y con qué video ocurre.
+- **Videos vigilados.** Si un video pierde muchos cuadros (va a tirones), IGP_Soft lo anota en el archivo `IGP_Soft.diagnostico.log`, con el monitor, la zona y el tamaño del video.
+- **Videos sin imagen.** Si a los pocos segundos de abrirse un video no muestra ninguna imagen (la zona queda en negro), IGP_Soft lo anota en el diagnóstico y vuelve a abrir esa zona una vez. Si sigue igual, la deja como está y te avisa en el panel.
+
+Si algo falla con los videos, en **⚙ Ajustes → Rendimiento** pulsa **▤ Abrir el diagnóstico**: se abre la carpeta con el archivo `IGP_Soft.diagnostico.log` seleccionado, listo para enviarlo. Conviene reproducir el problema una vez antes de enviarlo.
 
 En la página **Pantallas**, el chip **Memoria navegador** muestra cuánta RAM usan las pantallas en este momento (también aparece en la tarjeta de estado del menú). Se pone **amarillo** si pasa de la mitad de la RAM del equipo.
 
@@ -405,9 +409,10 @@ En **⚙ Ajustes → Rendimiento**:
 
 | Opción | Para qué sirve |
 |--------|----------------|
-| **Usar la tarjeta de video** | Viene activada. Desactívala solo si la tarjeta de video es débil o da problemas (se aplica al volver a abrir las pantallas). |
+| **Usar la tarjeta de video** | Viene activada. Desactívala solo si la tarjeta de video es débil o da problemas. Si hay páginas abiertas, IGP_Soft pregunta si quieres reabrirlas ahora para que el cambio se aplique. |
 | **Recargar** | *Nunca*, o *cada 6, 12 o 24 horas*. Cierra y vuelve a abrir todas las pantallas en el mismo lugar, para liberar la memoria que las páginas acumulan con los días. Útil en equipos que pasan días encendidos. |
 | **⟳ Recargar todo ahora** | Hace esa recarga en el momento. Las pantallas desaparecen unos segundos y vuelven solas. |
+| **▤ Abrir el diagnóstico** | Abre la carpeta del archivo `IGP_Soft.diagnostico.log`, para enviarlo cuando algo falla. |
 
 ## 15. Actualizaciones
 

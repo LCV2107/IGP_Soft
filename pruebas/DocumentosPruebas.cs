@@ -151,6 +151,91 @@ public sealed class DocumentosPruebas : IDisposable
     [InlineData("IGP_Soft · 20 cuadros · 3 perdidos · 640x360", false)]
     [InlineData("IGP_Soft", false)]
     [InlineData("IGP_Soft · 200 cuadros · 100 perdidos · 3840x2160 — Mozilla Firefox", true)]
+    [InlineData("IGP_Soft · 540 cuadros · 60 perdidos · 1920x1080 · total 4410 · estado 4/1 · error 0 - [InPrivate]: Microsoft Edge", true)]
+    [InlineData("IGP_Soft · 240 cuadros · 0 perdidos · 4096x2160 · total 980 · estado 4/1 · error 0", false)]
     public void Reconoce_un_video_con_tirones(string titulo, bool tirones) =>
         Assert.Equal(tirones, PantallasLocales.Tirones(titulo) is not null);
+
+    [Fact]
+    public void La_pagina_del_video_informa_estado_y_error()
+    {
+        string html = MediaWrapper.VideoHtml("file:///C:/v.mp4");
+        Assert.Contains("' · total '", html);
+        Assert.Contains("v.readyState", html);
+        Assert.Contains("v.networkState", html);
+        Assert.Contains("v.error.code", html);
+        Assert.Contains("IGP_Soft · oculto", html);
+        Assert.Contains("IGP_Soft · pausado", html);
+    }
+
+    [Fact]
+    public void Lee_un_video_que_muestra_imagen()
+    {
+        LecturaVideo? l = PantallasLocales.LeerVideo("IGP_Soft · 239 cuadros · 0 perdidos · 4096x2160 · total 239 · estado 4/1 · error 0 - [InPrivate]: Microsoft​ Edge");
+        Assert.Equal(new LecturaVideo(false, false, 239, 4, 1, 0), l);
+    }
+
+    [Fact]
+    public void Lee_un_video_sin_cuadros_y_su_error()
+    {
+        LecturaVideo? l = PantallasLocales.LeerVideo("IGP_Soft · 0 cuadros · 0 perdidos · 0x0 · total 0 · estado 0/3 · error 4");
+        Assert.Equal(new LecturaVideo(false, false, 0, 0, 3, 4), l);
+    }
+
+    [Theory]
+    [InlineData("IGP_Soft · oculto · total 0 · estado 4/1 · error 0", true, false)]
+    [InlineData("IGP_Soft · pausado · total 120 · estado 4/1 · error 0", false, true)]
+    public void Lee_un_video_oculto_o_pausado(string titulo, bool oculto, bool pausado)
+    {
+        LecturaVideo l = PantallasLocales.LeerVideo(titulo)!;
+        Assert.Equal(oculto, l.Oculto);
+        Assert.Equal(pausado, l.Pausado);
+    }
+
+    [Theory]
+    [InlineData("IGP_Soft")]
+    [InlineData("")]
+    [InlineData("IGP_Soft · 540 cuadros · 60 perdidos · 1920x1080")]
+    public void Sin_el_informe_completo_no_hay_lectura(string titulo) =>
+        Assert.Null(PantallasLocales.LeerVideo(titulo));
+}
+
+public class PerfilNavegadorPruebas
+{
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Fija_la_aceleracion_sin_perder_lo_demas(bool aceleracion)
+    {
+        string json = Profiles.AjustarLocalState("{\"browser\":{\"x\":1},\"hardware_acceleration_mode\":{\"enabled\":" + (!aceleracion).ToString().ToLowerInvariant() + ",\"otro\":2}}", aceleracion);
+        Assert.Equal(aceleracion, Profiles.AceleracionDelPerfil(json));
+        Assert.Contains("\"browser\":{\"x\":1}", json);
+        Assert.Contains("\"otro\":2", json);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{roto")]
+    [InlineData("[1,2]")]
+    [InlineData("{\"hardware_acceleration_mode\":5}")]
+    public void Un_local_state_ausente_o_danado_se_reemplaza(string? json)
+    {
+        Assert.False(Profiles.AceleracionDelPerfil(Profiles.AjustarLocalState(json, false)));
+        Assert.True(Profiles.AceleracionDelPerfil(Profiles.AjustarLocalState(json, true)));
+    }
+
+    [Fact]
+    public void Sin_dato_de_aceleracion_no_se_inventa()
+    {
+        Assert.Null(Profiles.AceleracionDelPerfil(null));
+        Assert.Null(Profiles.AceleracionDelPerfil("{\"browser\":{}}"));
+        Assert.Null(Profiles.AceleracionDelPerfil("{roto"));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Temp\IGP_Soft_Profiles\compartido_Edge", "compartido")]
+    [InlineData(@"C:\Temp\IGP_Soft_Profiles\DISPLAY1-0_abc", "propio")]
+    public void Nombra_el_tipo_de_perfil(string dir, string tipo) =>
+        Assert.Equal(tipo, Profiles.TipoDe(dir));
 }

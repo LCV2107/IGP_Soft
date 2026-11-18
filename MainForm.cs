@@ -1322,7 +1322,8 @@ internal sealed class MainForm : Form
     private void EditLayout(EstadoMonitor m)
     {
         var contents = m.Zonas.Where(z => z.Url is not null).ToDictionary(z => z.Zona, z => z.Titulo ?? "");
-        using var f = new LayoutEditorForm(m.Numero, new Size(m.Ancho, m.Alto), m.Layout(), contents);
+        var miembros = m.AreasMiembros?.Select(a => new Rectangle(a.X, a.Y, a.Ancho, a.Alto)).ToList();
+        using var f = new LayoutEditorForm(m.Numero, new Size(m.Ancho, m.Alto), m.Layout(), contents, miembros);
         if (f.ShowDialog(this) != DialogResult.OK) return;
         _ = _p.CambiarGrilla(m.Id, f.Result);
     }

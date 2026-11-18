@@ -15,28 +15,45 @@ internal sealed class LayoutEditorForm : Form
 
     public GridLayout Result { get; private set; }
 
-    public LayoutEditorForm(int monitorNumber, Size monitorSize, GridLayout current, IReadOnlyDictionary<int, string> contents)
+    public LayoutEditorForm(int monitorNumber, Size monitorSize, GridLayout current, IReadOnlyDictionary<int, string> contents,
+        IReadOnlyList<Rectangle>? miembros = null)
     {
         _original = current;
         _contents = contents;
         Result = current;
+        miembros ??= Array.Empty<Rectangle>();
 
         Theme.StyleWindow(this, darkCaption: false);
-        Text = $"Diseñar grilla — Monitor {monitorNumber}";
+        Text = miembros.Count > 1 ? $"Diseñar grilla — Monitor {monitorNumber} ({miembros.Count} monitores combinados)" : $"Diseñar grilla — Monitor {monitorNumber}";
         StartPosition = FormStartPosition.CenterParent;
-        Size = new Size(1020, 680);
-        MinimumSize = new Size(820, 560);
+        Size = new Size(1100, 720);
+        MinimumSize = new Size(880, 600);
         ShowInTaskbar = false;
 
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(16, 14, 16, 0), WrapContents = false, BackColor = Theme.Background };
-        top.Controls.Add(new Label { Text = "Columnas", AutoSize = true, Margin = new Padding(0, 9, 6, 0), ForeColor = Theme.TextMuted });
+        float aspecto = monitorSize.Height > 0 ? (float)monitorSize.Width / monitorSize.Height : 16f / 9f;
+
+        var divisiones = Fila();
+        divisiones.Controls.Add(Etiqueta("Dividir en"));
+        foreach ((int c, int r) in GridLayout.Divisiones)
+            AgregarBoton(divisiones, $"{c}×{r}", $"{c} columnas × {r} filas · {c * r} zonas", GridLayout.Uniform(c, r), aspecto);
+        var muro = Fila();
+        IReadOnlyList<(string Name, int Cols, int Rows)> atajos = GridLayout.AtajosDeGrupo(miembros);
+        if (atajos.Count > 0)
+        {
+            muro.Controls.Add(Etiqueta("Videowall"));
+            foreach ((string name, int c, int r) in atajos)
+                AgregarBoton(muro, name, $"{name}: {c} × {r}, alineada con los bordes de cada monitor", GridLayout.Uniform(c, r), aspecto);
+        }
+
+        var modelos = Fila();
+        modelos.Controls.Add(Etiqueta("Columnas"));
         _cols.SetBounds(0, 0, 50, 28);
-        _cols.Margin = new Padding(0, 5, 16, 0);
-        top.Controls.Add(_cols);
-        top.Controls.Add(new Label { Text = "Filas", AutoSize = true, Margin = new Padding(0, 9, 6, 0), ForeColor = Theme.TextMuted });
+        _cols.Margin = new Padding(0, 14, 16, 0);
+        modelos.Controls.Add(_cols);
+        modelos.Controls.Add(Etiqueta("Filas"));
         _rows.SetBounds(0, 0, 50, 28);
-        _rows.Margin = new Padding(0, 5, 24, 0);
-        top.Controls.Add(_rows);
+        _rows.Margin = new Padding(0, 14, 24, 0);
+        modelos.Controls.Add(_rows);
         foreach (NumericUpDown n in new[] { _cols, _rows })
         {
             n.Minimum = 1;
@@ -47,16 +64,20 @@ internal sealed class LayoutEditorForm : Form
                 SetLayout(GridLayout.Uniform((int)_cols.Value, (int)_rows.Value));
             };
         }
-        top.Controls.Add(new Label { Text = "Listas:", AutoSize = true, Margin = new Padding(0, 9, 8, 0), ForeColor = Theme.TextMuted });
+        modelos.Controls.Add(Etiqueta("Modelos"));
         foreach ((string name, GridLayout layout) in GridLayout.Presets)
-        {
-            GridLayout captured = layout;
-            ModernButton b = Page.ToolButton(name, () => SetLayout(captured));
-            b.Margin = new Padding(0, 0, 6, 0);
-            top.Controls.Add(b);
-        }
+            AgregarBoton(modelos, name, name, layout, aspecto);
 
-        _canvas = new LayoutCanvas(monitorSize, contents) { Dock = DockStyle.Fill };
+        var top = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(16, 10, 16, 0), BackColor = Theme.Background };
+        modelos.Dock = DockStyle.Top;
+        divisiones.Dock = DockStyle.Top;
+        muro.Dock = DockStyle.Top;
+        top.Controls.Add(modelos);
+        top.Controls.Add(divisiones);
+        if (atajos.Count > 0) top.Controls.Add(muro);
+        else muro.Dispose();
+
+        _canvas = new LayoutCanvas(monitorSize, contents) { Dock = DockStyle.Fill, Miembros = miembros };
         _canvas.SelectionChanged += UpdateButtons;
 
         var right = new FlowLayoutPanel
@@ -66,9 +87,9 @@ internal sealed class LayoutEditorForm : Form
         };
         right.Controls.Add(new Label
         {
-            AutoSize = false, Size = new Size(248, 100), ForeColor = Theme.TextMuted,
-            Text = "Arrastra el mouse sobre las celdas para seleccionarlas (o haz clic en una zona).\n\n" +
-                   "Luego únelas en una sola zona, sepáralas o márcalas para no usarlas.",
+            AutoSize = false, Size = new Size(248, 150), ForeColor = Theme.TextMuted,
+            Text = "Elige una división arriba: el lienzo muestra cómo quedará y nada cambia en las pantallas hasta «Aplicar».\n\n" +
+                   "Arrastra el mouse sobre las celdas para seleccionarlas (o haz clic en una zona) y únelas, sepáralas o márcalas para no usarlas.",
         });
         var btnReset = new ModernButton("Restablecer cuadrícula", ButtonKind.Ghost, "↺");
         foreach (ModernButton b in new[] { _btnMerge, _btnSplit, _btnToggle, btnReset })
@@ -125,6 +146,37 @@ internal sealed class LayoutEditorForm : Form
         _canvas.Grid = layout;
         _canvas.ClearSelection();
         UpdateButtons();
+    }
+
+    private readonly List<BotonDivision> _botones = new();
+    private readonly ToolTip _tips = new() { InitialDelay = 300 };
+
+    private static FlowLayoutPanel Fila() => new()
+    {
+        AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true,
+        Padding = new Padding(0, 0, 0, 6), BackColor = Theme.Background,
+    };
+
+    private static Label Etiqueta(string texto, int izquierda = 0) => new()
+    {
+        Text = texto, AutoSize = true, Margin = new Padding(izquierda, 18, 8, 0), ForeColor = Theme.TextMuted,
+    };
+
+    private void AgregarBoton(FlowLayoutPanel fila, string texto, string ayuda, GridLayout layout, float aspecto)
+    {
+        var b = new BotonDivision(texto, layout, aspecto) { Margin = new Padding(0, 0, 6, 0) };
+        _tips.SetToolTip(b, ayuda);
+        b.Click += (_, _) => SetLayout(layout);
+        b.MouseEnter += (_, _) => _canvas.Fantasma = layout.SameAs(_canvas.Grid) ? null : layout;
+        b.MouseLeave += (_, _) => _canvas.Fantasma = null;
+        _botones.Add(b);
+        fila.Controls.Add(b);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _tips.Dispose();
+        base.Dispose(disposing);
     }
 
     private void Merge()
@@ -196,7 +248,67 @@ internal sealed class LayoutEditorForm : Form
             _status.Text = text + (_contents.Count > 0 ? "\n\nLo que está abierto se mantiene." : "");
         }
         _canvas.Carry = carry;
+        _canvas.Fantasma = null;
         _canvas.Invalidate();
+        foreach (BotonDivision b in _botones) b.Marcado = b.Grilla.SameAs(l);
+    }
+}
+
+internal sealed class BotonDivision : Control
+{
+    private const int AnchoMax = 52;
+    private const int AltoMax = 30;
+    private readonly Size _dibujo;
+    private bool _encima;
+    private bool _marcado;
+
+    public GridLayout Grilla { get; }
+
+    public bool Marcado
+    {
+        get => _marcado;
+        set { if (_marcado == value) return; _marcado = value; Invalidate(); }
+    }
+
+    public BotonDivision(string texto, GridLayout layout, float aspecto)
+    {
+        Text = texto;
+        Grilla = layout;
+        aspecto = Math.Clamp(aspecto, 0.5f, 4f);
+        int ancho = Math.Min(AnchoMax, (int)(AltoMax * aspecto));
+        _dibujo = new Size(ancho, Math.Max(12, (int)(ancho / aspecto)));
+        DoubleBuffered = true;
+        Font = Theme.Small;
+        Cursor = Cursors.Hand;
+        int textoAncho = TextRenderer.MeasureText(texto, Font).Width;
+        Size = new Size(Math.Max(ancho, textoAncho) + 14, AltoMax + 30);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _encima = true; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _encima = false; Invalidate(); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        Graphics g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? Theme.Background);
+        Theme.Smooth(g);
+        var fondo = new Rectangle(0, 0, Width - 1, Height - 1);
+        if (_marcado || _encima)
+            Theme.FillRound(g, _marcado ? Theme.AccentSoft : Theme.Surface, fondo, 8);
+        if (_marcado) Theme.DrawRound(g, Theme.Accent, fondo, 8, 1.5f);
+        else if (_encima) Theme.DrawRound(g, Theme.BorderStrong, fondo, 8);
+
+        var tablero = new Rectangle((Width - _dibujo.Width) / 2, 6 + (AltoMax - _dibujo.Height) / 2, _dibujo.Width, _dibujo.Height);
+        foreach (ZoneSpec z in Grilla.Zones)
+        {
+            Rectangle r = Grilla.AreaOf(z, tablero);
+            r.Inflate(-1, -1);
+            if (r.Width < 1 || r.Height < 1) continue;
+            Theme.FillRound(g, z.Off ? Theme.BorderStrong : _marcado || _encima ? Theme.Accent : Theme.TextSubtle, r, 2);
+        }
+        TextRenderer.DrawText(g, Text, Font, new Rectangle(0, 6 + AltoMax + 3, Width, Height - AltoMax - 9),
+            _marcado ? Theme.Accent : Theme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.NoPrefix);
     }
 }
 
@@ -210,6 +322,15 @@ internal sealed class LayoutCanvas : Control
     public GridLayout Grid { get; set; } = GridLayout.Uniform(1, 1);
     public Rectangle? Selection { get; private set; }
     public Dictionary<int, int> Carry { get; set; } = new();
+    public IReadOnlyList<Rectangle> Miembros { get; set; } = Array.Empty<Rectangle>();
+
+    private GridLayout? _fantasma;
+
+    public GridLayout? Fantasma
+    {
+        get => _fantasma;
+        set { if (_fantasma == value) return; _fantasma = value; Invalidate(); }
+    }
 
     public event Action? SelectionChanged;
 
@@ -362,6 +483,40 @@ internal sealed class LayoutCanvas : Control
             Rectangle rect = Rectangle.Inflate(Grid.AreaOf(zs, board), -1, -1);
             Theme.FillRound(g, Color.FromArgb(70, 250, 204, 21), rect, 9);
             Theme.DrawRound(g, Color.FromArgb(250, 204, 21), rect, 9, 3f);
+        }
+
+        if (_fantasma is { } f)
+        {
+            using var velo = new SolidBrush(Color.FromArgb(200, 30, 41, 59));
+            g.FillRectangle(velo, board);
+            foreach (ZoneSpec z in f.Zones)
+            {
+                Rectangle rect = Rectangle.Inflate(f.AreaOf(z, board), -4, -4);
+                Theme.FillRound(g, Color.FromArgb(z.Off ? 20 : 45, 250, 204, 21), rect, 8);
+                Theme.DrawRound(g, Color.FromArgb(250, 204, 21), rect, 8, 2f);
+            }
+            int n = f.ActiveCount;
+            TextRenderer.DrawText(g, $"{f.Describe()} · {n} {(n == 1 ? "zona" : "zonas")} · clic para ver cómo queda", Theme.SmallBold,
+                new Rectangle(board.X, board.Bottom + 2, board.Width, 20), Theme.TextMuted, TextFormatFlags.HorizontalCenter);
+        }
+
+        if (Miembros.Count > 1)
+        {
+            double sx = (double)board.Width / _monitor.Width, sy = (double)board.Height / _monitor.Height;
+            using var sombra = new Pen(Color.FromArgb(200, 15, 23, 42), 5f);
+            using var linea = new Pen(Color.FromArgb(235, 255, 255, 255), 2f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
+            foreach (Rectangle m in Miembros)
+            {
+                int x0 = board.X + (int)Math.Round(m.Left * sx), y0 = board.Y + (int)Math.Round(m.Top * sy);
+                int x1 = board.X + (int)Math.Round(m.Right * sx), y1 = board.Y + (int)Math.Round(m.Bottom * sy);
+                foreach (Pen pen in new[] { sombra, linea })
+                {
+                    if (x0 > board.Left + 2) g.DrawLine(pen, x0, y0, x0, y1);
+                    if (y0 > board.Top + 2) g.DrawLine(pen, x0, y0, x1, y0);
+                }
+            }
+            TextRenderer.DrawText(g, "- - -  bordes de cada monitor", Theme.Small,
+                new Rectangle(board.X, board.Top - 20, board.Width, 18), Theme.TextMuted, TextFormatFlags.Right);
         }
     }
 }

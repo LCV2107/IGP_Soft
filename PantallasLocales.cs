@@ -66,6 +66,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         {
             CheckClosedWindows();
             EnforceWindows();
+            VigilarVideos();
             foreach (DisplaySurface surface in _surfaces.Values)
                 if (!surface.IsDisposed) surface.BarrasAlFrente();
         };
@@ -434,6 +435,92 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             }
     }
 
+    private readonly HashSet<(string Monitor, int Zona, string Url)> _videosReabiertos = new();
+
+    private void VigilarVideos()
+    {
+        if (_disposed) return;
+        DateTime ahora = DateTime.Now;
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Usable)
+            {
+                if (s.Link is not { } link || s.Launched is not { Closed: false, Native: false, Attached: false, VideoConfirmado: false } w) continue;
+                if (!MediaWrapper.EsVideo(link.Url) || ahora - w.Abierta < TimeSpan.FromSeconds(8) || w.Hidden) continue;
+                LecturaVideo? l = LeerVideo(WindowManager.Titulo(w.Hwnd));
+                var clave = (t.Id, s.Index, link.Url);
+                if (l is { Total: > 0 })
+                {
+                    w.VideoConfirmado = true;
+                    if (_videosReabiertos.Remove(clave))
+                        Diagnostico.Log($"Video con imagen después de reabrir: monitor {t.Number}, zona {t.DisplayNumber(s)} («{link.Titulo}»)");
+                    continue;
+                }
+                if (l is { Oculto: true } or { Pausado: true, Error: 0 }) continue;
+
+                w.VideoConfirmado = true;
+                Diagnostico.Log($"Video sin imagen a los {(int)(ahora - w.Abierta).TotalSeconds} s: monitor {t.Number}, zona {t.DisplayNumber(s)} («{link.Titulo}») · " +
+                    (l is null ? "la página del video no informó" : $"cuadros 0, estado {l.ReadyState}/{l.NetworkState}, error {l.Error}") + " · " + DatosVideo(t, s, w));
+                if (_videosReabiertos.Add(clave))
+                {
+                    Diagnostico.Log("  se reabre la zona una vez");
+                    _ = OpenAsync(t, s, link, quiet: true);
+                    continue;
+                }
+                _videosReabiertos.Remove(clave);
+                Diagnostico.Log("  sigue sin imagen después de reabrir: se deja como está");
+                Avisar(new Resultado(false, "video_sin_imagen", "Video sin imagen",
+                    $"El video «{link.Titulo}» del monitor {t.Number}, zona {t.DisplayNumber(s)}, no muestra imagen. " +
+                    "Se reabrió una vez y sigue igual. Los detalles quedaron en el diagnóstico (Ajustes ▸ Abrir el diagnóstico).", Nivel.Aviso));
+            }
+    }
+
+    private void AnotarVideoAbierto(PantallaMonitor t, Segment s, LaunchedWindow w)
+    {
+        if (s.Link is not { } link || !MediaWrapper.EsVideo(link.Url)) return;
+        Diagnostico.Log($"Video abierto: monitor {t.Number}, zona {t.DisplayNumber(s)} («{link.Titulo}») · {DatosVideo(t, s, w)}");
+    }
+
+    private string DatosVideo(PantallaMonitor t, Segment s, LaunchedWindow w)
+    {
+        Rectangle zona = s.Area;
+        string monitores = t.Monitor.Members is { Count: > 1 } miembros
+            ? $"grupo de {miembros.Count} monitores, la zona toca {miembros.Count(m => new Rectangle(m.X, m.Y, m.Width, m.Height).IntersectsWith(zona))}: " +
+              string.Join(", ", miembros.Select(m => $"{m.ShortName} {m.Width}x{m.Height} en {MonitorEnumerator.TarjetaDe(m.DeviceName)}"))
+            : $"{t.Monitor.ShortName} {t.Monitor.Width}x{t.Monitor.Height} en {MonitorEnumerator.TarjetaDe(t.Monitor.DeviceName)}";
+        int videos = _pantallas.Sum(p => p.Segments.Count(x => x.Link is not null && MediaWrapper.EsVideo(x.Link.Url) &&
+            x.Launched is { Closed: false } o && string.Equals(o.ProfileDir, w.ProfileDir, StringComparison.OrdinalIgnoreCase)));
+        string aceleracion = w.SinGpu ? "apagada (--disable-gpu)" : "encendida";
+        string perfil = w.AceleracionEnPerfil switch { true => "encendida", false => "APAGADA", null => "sin dato" };
+        return $"{Browser?.Name} {VersionNavegador()} pid {w.ProcessId} · perfil {Profiles.TipoDe(w.ProfileDir)}" +
+               $"{(w.NavegadorYaAbierto ? ", navegador ya abierto" : ", navegador nuevo")} · aceleración {aceleracion}, en el perfil {perfil}" +
+               $" · {videos} video(s) en el mismo navegador · zona {zona.Width}x{zona.Height} · {monitores}" +
+               $" · IGPDesk {(Diagnostico.Controlador is { } c ? $"conectado ({c})" : "sin conexión")}";
+    }
+
+    private string? _versionNavegador;
+    private string? _versionDe;
+
+    private string VersionNavegador()
+    {
+        if (Browser is not { } b) return "";
+        if (_versionDe != b.ExePath)
+        {
+            _versionDe = b.ExePath;
+            try { _versionNavegador = System.Diagnostics.FileVersionInfo.GetVersionInfo(b.ExePath).ProductVersion; }
+            catch { _versionNavegador = null; }
+        }
+        return _versionNavegador ?? "";
+    }
+
+    public static LecturaVideo? LeerVideo(string titulo)
+    {
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(titulo,
+            @"IGP_Soft · (?:(oculto)|(pausado)|\d+ cuadros · \d+ perdidos · \d+x\d+) · total (\d+) · estado (\d)/(\d) · error (\d+)");
+        if (!m.Success) return null;
+        return new LecturaVideo(m.Groups[1].Success, m.Groups[2].Success, long.Parse(m.Groups[3].Value),
+            int.Parse(m.Groups[4].Value), int.Parse(m.Groups[5].Value), int.Parse(m.Groups[6].Value));
+    }
+
     public static (int Cuadros, int Perdidos, string Tamano)? Tirones(string titulo)
     {
         System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(titulo, @"(\d+) cuadros · (\d+) perdidos · (\d+x\d+)");
@@ -647,6 +734,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         }
 
         s.Launched = win;
+        AnotarVideoAbierto(t, s, win);
         Notify();
         EnforceWindows();
         ZoneOpened?.Invoke();

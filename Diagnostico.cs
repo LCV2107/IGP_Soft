@@ -6,6 +6,8 @@ internal static class Diagnostico
 {
     public static readonly string FilePath = Path.Combine(AppPaths.DataDir, "IGP_Soft.diagnostico.log");
 
+    public static volatile string? Controlador;
+
     private const long MaxBytes = 512 * 1024;
     private static readonly object Gate = new();
 

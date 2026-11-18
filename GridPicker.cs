@@ -90,7 +90,7 @@ internal sealed class GridPicker : Control
         if (advanced is not null)
         {
             drop.Items.Add(new ToolStripSeparator());
-            drop.Items.Add(new ToolStripMenuItem("⊞  Unir zonas o elegir cuáles usar…", null, (_, _) =>
+            drop.Items.Add(new ToolStripMenuItem("▦  Más divisiones y vista previa…", null, (_, _) =>
             {
                 drop.Close();
                 owner.BeginInvoke(advanced);
