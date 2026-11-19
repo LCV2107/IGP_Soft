@@ -482,7 +482,7 @@ internal static class MediaWrapper
 
     public static string ImagenHtml(string src, VistaImagen? vista) => """
         <!doctype html><html><head><meta charset="utf-8"><title>IGP_Soft</title><style>
-        html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}
+        html,body{margin:0;width:100%;height:100%;background:@@FONDO@@;overflow:hidden}
         img{position:absolute;left:0;top:0;user-select:none;-webkit-user-drag:none}
         #b{position:fixed;right:12px;bottom:12px;display:flex;align-items:center;background:rgba(15,23,42,.85);border-radius:10px;opacity:0;transition:opacity .2s;font:600 14px "Segoe UI",sans-serif}
         #b.v{opacity:1}
@@ -510,7 +510,7 @@ internal static class MediaWrapper
         addEventListener('keydown',function(e){if(e.altKey||e.ctrlKey)return;var m={'+':'acercar','-':'alejar','0':'encajar',ArrowLeft:'izquierda',ArrowRight:'derecha',ArrowUp:'arriba',ArrowDown:'abajo'}[e.key];if(m){act(m);e.preventDefault()}});
         addEventListener('resize',draw);img.addEventListener('load',draw);if(img.complete)draw();
         </script></body></html>
-        """.Replace("@@SRC@@", src).Replace("@@VISTA@@", Encuadre.Js(vista));
+        """.Replace("@@SRC@@", src).Replace("@@VISTA@@", Encuadre.Js(vista)).Replace("@@FONDO@@", FondoZonas.Css);
 
     public static string? Prepare(string target, string dir, VistaImagen? vista = null)
     {
@@ -529,7 +529,7 @@ internal static class MediaWrapper
 
     public static string VideoHtml(string src) => $$$"""
         <!doctype html><html><head><meta charset="utf-8"><title>IGP_Soft</title><style>
-        html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;font:14px "Segoe UI",sans-serif;color:#fff}
+        html,body{margin:0;width:100%;height:100%;background:{{{FondoZonas.Css}}};overflow:hidden;font:14px "Segoe UI",sans-serif;color:#fff}
         body.quieto{cursor:none}
         video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}
         #barra{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:14px;background:rgba(20,20,20,.82);transition:opacity .25s;max-width:calc(100% - 32px);box-sizing:border-box}
@@ -1596,6 +1596,11 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hWnd);
+
+    public const uint PW_RENDERFULLCONTENT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     [DllImport("user32.dll")]
     public static extern int GetWindowTextLength(IntPtr hWnd);

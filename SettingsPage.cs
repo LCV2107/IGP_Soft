@@ -6,6 +6,7 @@ internal sealed class SettingsPage : Page
     private readonly ToggleSwitch _chkWindows = new("Iniciar IGP_Soft al encender Windows");
     private readonly ToggleSwitch _chkKeep = new("Recordar cookies e inicios de sesión de las páginas");
     private readonly ToggleSwitch _chkGpu = new("Usar la tarjeta de video (aceleración por hardware)");
+    private readonly ComboBox _cboFondo = new();
     private readonly ComboBox _cboReload = new();
     private static readonly int[] ReloadOptions = { 0, 6, 12, 24 };
     private readonly ComboBox _cboLimit = new();
@@ -37,8 +38,22 @@ internal sealed class SettingsPage : Page
             BackColor = Theme.Background, Padding = new Padding(0, 0, 0, 12),
         };
 
+        _cboFondo.DropDownStyle = ComboBoxStyle.DropDownList;
+        _cboFondo.FlatStyle = FlatStyle.Flat;
+        _cboFondo.Font = Theme.Body;
+        _cboFondo.Width = 220;
+        _cboFondo.Items.AddRange(new object[] { "Negro", "Blanco" });
+        _cboFondo.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_loading && _cboFondo.SelectedIndex >= 0) FondoZonas.Blanco = _cboFondo.SelectedIndex == 1;
+        };
+        var fondoNote = new Label
+        {
+            Text = "Se ve donde una imagen o un video no llena su zona, en las zonas vacías y en las capturas de los perfiles. Las imágenes y videos que se muestran en el navegador lo toman al volver a abrirse.",
+            AutoSize = false, Size = new Size(560, 36), ForeColor = Theme.TextMuted, Font = Theme.Small, Margin = new Padding(0, 0, 0, 6),
+        };
         flow.Controls.Add(Section("▦", "Pantallas", "Cómo se muestran las páginas en los monitores.",
-            Row("Navegador", browser), Toggle(preview), Toggle(skipPrimary)));
+            Row("Navegador", browser), Row("Fondo", _cboFondo), fondoNote, Toggle(preview), Toggle(skipPrimary)));
 
         var hotkeyRows = new List<Control>();
         foreach (HotkeyAction a in Hotkeys.Actions) hotkeyRows.Add(HotkeyRow(a));
@@ -210,6 +225,7 @@ internal sealed class SettingsPage : Page
         _chkWindows.Checked = Startup.WithWindows;
         _chkKeep.Checked = Profiles.KeepData;
         _chkGpu.Checked = Profiles.HardwareAcceleration;
+        _cboFondo.SelectedIndex = FondoZonas.Blanco ? 1 : 0;
         _cboChannel.SelectedIndex = Updater.Channel == UpdateChannel.Experimental ? 1 : 0;
         _chkNotify.Checked = Updater.Notify;
         RefreshUpdates();

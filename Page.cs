@@ -75,6 +75,45 @@ internal sealed class ListaSinSaltos : FlowLayoutPanel
         _mostrando || Tabulando ? base.ScrollToControl(activeControl) : DisplayRectangle.Location;
 }
 
+internal sealed class ListaSinParpadeo : ListBox
+{
+    private const int WM_ERASEBKGND = 0x0014;
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_ERASEBKGND)
+        {
+            using (Graphics g = Graphics.FromHdc(m.WParam))
+            using (var libre = new Region(ClientRectangle))
+            {
+                for (int i = Math.Max(0, TopIndex); i < Items.Count; i++)
+                {
+                    Rectangle r = GetItemRectangle(i);
+                    if (r.Top >= ClientSize.Height) break;
+                    libre.Exclude(r);
+                }
+                using var fondo = new SolidBrush(BackColor);
+                g.FillRegion(fondo, libre);
+            }
+            m.Result = (IntPtr)1;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnDrawItem(DrawItemEventArgs e)
+    {
+        if (e.Bounds.Width <= 0 || e.Bounds.Height <= 0)
+        {
+            base.OnDrawItem(e);
+            return;
+        }
+        using BufferedGraphics buffer = BufferedGraphicsManager.Current.Allocate(e.Graphics, e.Bounds);
+        base.OnDrawItem(new DrawItemEventArgs(buffer.Graphics, e.Font, e.Bounds, e.Index, e.State, e.ForeColor, e.BackColor));
+        buffer.Render(e.Graphics);
+    }
+}
+
 internal static class ListasUtil
 {
     public static int Indice(this ListBox lista, Point p)

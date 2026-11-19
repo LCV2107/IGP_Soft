@@ -970,7 +970,7 @@ internal sealed class MainForm : Form
     {
         var lista = new List<(int, byte[])>();
         foreach (EstadoMonitor m in _estado.Monitores.Where(m => !m.Omitido).OrderBy(m => m.Numero).ToList())
-            if (await _p.VistaPrevia(m.Id, CapturasPerfiles.Ancho) is { Length: > 0 } jpeg)
+            if (await _p.VistaPrevia(m.Id, CapturasPerfiles.Ancho, soloZonas: true) is { Length: > 0 } jpeg)
                 lista.Add((m.Numero, jpeg));
         return lista;
     }

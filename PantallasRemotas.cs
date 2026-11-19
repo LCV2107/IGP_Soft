@@ -377,11 +377,11 @@ internal sealed class PantallasRemotas : IPantallas, IArchivosRemotos, IDisposab
         return r.Ok && e is { } v ? Protocolo.Leer<List<MonitorFisico>>(v, "monitores") ?? new() : new();
     }
 
-    public async Task<byte[]?> VistaPrevia(string monitor, int ancho)
+    public async Task<byte[]?> VistaPrevia(string monitor, int ancho, bool soloZonas = false)
     {
         if (_canal is null) return null;
         JsonElement e;
-        try { e = await Pedir(Datos(("tipo", "vista_previa"), ("monitor", monitor), ("ancho", ancho))).ConfigureAwait(false); }
+        try { e = await Pedir(Datos(("tipo", "vista_previa"), ("monitor", monitor), ("ancho", ancho), ("zonas", soloZonas))).ConfigureAwait(false); }
         catch { return null; }
         if (!Protocolo.ComoResultado(e).Ok) return null;
         try { return Convert.FromBase64String(Protocolo.Texto(e, "jpeg") ?? ""); }

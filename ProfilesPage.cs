@@ -14,7 +14,7 @@ internal sealed class ProfilesPage : Page
 
     private readonly Func<string, LayoutProfile> _snapshot;
     private readonly Action<LayoutProfile> _open;
-    private readonly ListBox _list = new();
+    private readonly ListBox _list = new ListaSinParpadeo();
     private readonly ListBox _carpetas = new();
     private readonly RoundedTextBox _nameBox = new("Nombre del nuevo perfil, por ejemplo «Sala de monitoreo»", 400);
     private TextBox _name => _nameBox.Box;
@@ -280,8 +280,8 @@ internal sealed class ProfilesPage : Page
         int encima = i >= 0 && Flecha(_list.GetItemRectangle(i)).Contains(e.Location) ? i : -1;
         if (encima != _flechaEncima)
         {
-            if (_flechaEncima >= 0 && _flechaEncima < _list.Items.Count) _list.Invalidate(_list.GetItemRectangle(_flechaEncima));
-            if (encima >= 0) _list.Invalidate(_list.GetItemRectangle(encima));
+            if (_flechaEncima >= 0 && _flechaEncima < _list.Items.Count) _list.Invalidate(Flecha(_list.GetItemRectangle(_flechaEncima)));
+            if (encima >= 0) _list.Invalidate(Flecha(_list.GetItemRectangle(encima)));
             _flechaEncima = encima;
             _list.Cursor = encima >= 0 ? Cursors.Hand : Cursors.Default;
         }

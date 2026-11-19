@@ -136,6 +136,7 @@ internal static class DibujoPerfil
             int ancho = Math.Max(30, (int)(alto * proporciones[k]));
             var marco = new Rectangle(x, area.Y, ancho, alto);
             if (!m.Excluded && capturas.TryGetValue(m.Number, out Image? img)) Captura(g, marco, img);
+            else if (!m.Excluded && Vacio(m)) MonitorVacio(g, marco);
             else Monitor(g, marco, m);
             string etiqueta = $"Monitor {m.Number}" + (m.Primary ? " · principal" : "") + (m.Excluded ? " · omitido" : "");
             TextRenderer.DrawText(g, etiqueta, Theme.Small, new Rectangle(x, marco.Bottom + 3, ancho, Pie - 3), Theme.TextMuted,
@@ -148,6 +149,17 @@ internal static class DibujoPerfil
                     : "Esquema de lo que se abriría: este perfil no tiene captura. «Reemplazar con lo actual» la toma.",
                 Theme.Small, new Rectangle(area.X, area.Bottom - nota, area.Width, nota), Theme.TextMuted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+    }
+
+    public static bool Vacio(MonitorLayout m) => m.Links.All(l => string.IsNullOrEmpty(l.Url));
+
+    private static void MonitorVacio(Graphics g, Rectangle marco)
+    {
+        using (var fondo = new SolidBrush(FondoZonas.Color)) g.FillRectangle(fondo, marco);
+        TextRenderer.DrawText(g, "Vacío\nno proyectaba nada", Theme.Small, marco, FondoZonas.Texto,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+        using var borde = new Pen(Color.FromArgb(30, 41, 59), 2);
+        g.DrawRectangle(borde, marco);
     }
 
     private static void Captura(Graphics g, Rectangle marco, Image img)

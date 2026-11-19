@@ -261,5 +261,5 @@ internal interface IPantallas
     Task<Resultado> GuardarPerfiles(List<LayoutProfile> perfiles);
     Task<List<VentanaAbierta>> VentanasAbiertas();
     Task<List<MonitorFisico>> MonitoresFisicos();
-    Task<byte[]?> VistaPrevia(string monitor, int ancho);
+    Task<byte[]?> VistaPrevia(string monitor, int ancho, bool soloZonas = false);
 }

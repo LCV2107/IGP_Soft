@@ -22,6 +22,30 @@ internal static class AppPaths
     }
 }
 
+internal static class FondoZonas
+{
+    public const string Clave = "zonas.fondo";
+
+    public static event Action? Cambio;
+
+    public static bool Blanco
+    {
+        get => string.Equals(Config.Get(Clave), "blanco", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value == Blanco) return;
+            Config.Set(Clave, value ? "blanco" : "negro");
+            Cambio?.Invoke();
+        }
+    }
+
+    public static Color Color => Blanco ? Color.White : Color.Black;
+
+    public static string Css => Blanco ? "#fff" : "#000";
+
+    public static Color Texto => Blanco ? Color.FromArgb(100, 116, 139) : Color.FromArgb(148, 163, 184);
+}
+
 internal static class Config
 {
     public static readonly string FilePath = Path.Combine(AppPaths.DataDir, "IGP_Soft.config.txt");

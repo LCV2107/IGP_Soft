@@ -143,7 +143,7 @@ internal sealed class VisorImagen : Control
     {
         _imagen = imagen;
         _vista = vista ?? VistaImagen.Encajada;
-        BackColor = Color.White;
+        BackColor = FondoZonas.Color;
         Font = Theme.BodyBold;
         TabStop = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |

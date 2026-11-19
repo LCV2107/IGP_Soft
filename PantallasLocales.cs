@@ -82,6 +82,23 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         WindowWatcher.Start(OnWindowMoved);
         AssetStore.Moved += OnAssetsMoved;
         TecladoWeb.Iniciar(NavegarConTeclado);
+        FondoZonas.Cambio += AplicarFondo;
+    }
+
+    private void AplicarFondo()
+    {
+        Color c = FondoZonas.Color;
+        foreach (DisplaySurface surface in _surfaces.Values.Where(s => !s.IsDisposed))
+        {
+            surface.BackColor = c;
+            surface.Invalidate();
+        }
+        foreach (Segment s in _pantallas.SelectMany(p => p.Segments))
+            if (s.Launched?.Tag is VisorImagen v && !v.IsDisposed)
+            {
+                v.BackColor = c;
+                v.Invalidate();
+            }
     }
 
     private bool _vistaCambiada;
@@ -148,6 +165,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     {
         if (_disposed) return;
         TecladoWeb.Detener();
+        FondoZonas.Cambio -= AplicarFondo;
         _guard.Stop();
         _maintenance.Stop();
         WindowWatcher.Stop();
@@ -1888,15 +1906,96 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
     public Task<List<MonitorFisico>> MonitoresFisicos() =>
         Task.FromResult(MonitorEnumerator.GetOrdered().Select(m => new MonitorFisico(m.Id, m.X, m.Y, m.Width, m.Height, m.IsPrimary)).ToList());
 
-    public Task<byte[]?> VistaPrevia(string monitor, int ancho)
+    public Task<byte[]?> VistaPrevia(string monitor, int ancho, bool soloZonas = false)
     {
         if (FindMonitor(monitor) is not { } t) return Task.FromResult<byte[]?>(null);
         MonitorInfo m = t.Monitor;
+        if (soloZonas)
+        {
+            List<VentanaZona> zonas = ZonasProyectadas(t);
+            if (zonas.Count == 0) return Task.FromResult<byte[]?>(null);
+            Color fondo = FondoZonas.Color;
+            return Task.Run<byte[]?>(() =>
+            {
+                using Bitmap? bmp = CapturarZonas(m, zonas, fondo, ancho);
+                return bmp is null ? null : Imagenes.Jpeg(bmp);
+            });
+        }
         return Task.Run<byte[]?>(() =>
         {
             using Bitmap? bmp = CaptureMonitor(m, ancho);
             return bmp is null ? null : Imagenes.Jpeg(bmp);
         });
+    }
+
+    internal readonly record struct VentanaZona(IntPtr Hwnd, Rectangle Ventana, Rectangle Visible);
+
+    private static List<VentanaZona> ZonasProyectadas(PantallaMonitor t)
+    {
+        var lista = new List<VentanaZona>();
+        var pantalla = new Rectangle(t.Monitor.X, t.Monitor.Y, t.Monitor.Width, t.Monitor.Height);
+        foreach (Segment s in t.Segments)
+        {
+            if (s.Disabled || s.Pending is not null || s.Launched is not { Closed: false } w) continue;
+            if (!NativeMethods.IsWindow(w.Hwnd) || !NativeMethods.IsWindowVisible(w.Hwnd)) continue;
+            if (!NativeMethods.GetWindowRect(w.Hwnd, out NativeMethods.RECT r)) continue;
+            Rectangle ventana = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+            Rectangle visible = Rectangle.Intersect(ventana, pantalla);
+            if (visible.Width < 4 || visible.Height < 4) continue;
+            lista.Add(new VentanaZona(w.Hwnd, ventana, visible));
+        }
+        return lista;
+    }
+
+    internal static Bitmap? CapturarZonas(MonitorInfo monitor, IReadOnlyList<VentanaZona> zonas, Color fondo, int width)
+    {
+        try
+        {
+            int tw = Math.Clamp(width, 80, 1920);
+            int th = Math.Max(1, (int)(tw * (double)monitor.Height / monitor.Width));
+            double k = tw / (double)monitor.Width;
+            var thumb = new Bitmap(tw, th);
+            using Graphics g = Graphics.FromImage(thumb);
+            g.Clear(fondo);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            foreach (VentanaZona z in zonas)
+            {
+                using Bitmap? img = CapturarVentana(z.Hwnd, z.Ventana);
+                if (img is null) continue;
+                var origen = new Rectangle(z.Visible.X - z.Ventana.X, z.Visible.Y - z.Ventana.Y, z.Visible.Width, z.Visible.Height);
+                int x = (int)Math.Round((z.Visible.X - monitor.X) * k), y = (int)Math.Round((z.Visible.Y - monitor.Y) * k);
+                int r = (int)Math.Round((z.Visible.Right - monitor.X) * k), b = (int)Math.Round((z.Visible.Bottom - monitor.Y) * k);
+                g.DrawImage(img, new Rectangle(x, y, Math.Max(1, r - x), Math.Max(1, b - y)), origen, GraphicsUnit.Pixel);
+            }
+            return thumb;
+        }
+        catch { return null; }
+    }
+
+    private static Bitmap? CapturarVentana(IntPtr hwnd, Rectangle ventana)
+    {
+        if (ventana.Width <= 0 || ventana.Height <= 0) return null;
+        var bmp = new Bitmap(ventana.Width, ventana.Height);
+        try
+        {
+            bool ok;
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                IntPtr hdc = g.GetHdc();
+                try { ok = NativeMethods.PrintWindow(hwnd, hdc, NativeMethods.PW_RENDERFULLCONTENT); }
+                finally { g.ReleaseHdc(hdc); }
+            }
+            if (!ok)
+                using (Graphics g = Graphics.FromImage(bmp))
+                    g.CopyFromScreen(ventana.X, ventana.Y, 0, 0, ventana.Size);
+            return bmp;
+        }
+        catch
+        {
+            bmp.Dispose();
+            return null;
+        }
     }
 
     private sealed class DisplaySurface : Form
@@ -1911,7 +2010,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = true;
-            BackColor = Color.White;
+            BackColor = FondoZonas.Color;
             Place(monitor);
         }
 

@@ -226,7 +226,7 @@ Todo se maneja desde **una sola ventana**. El menú de la izquierda cambia la p�
 | **▤ Galería** | Tus imágenes, videos y documentos (ver punto 12). |
 | **★ Perfiles** | Guardar y abrir configuraciones completas de pantallas (ver punto 8). |
 | **⇪ Exportar y copias** | .zip, versión portable, copias de seguridad y restaurar (ver punto 11). |
-| **⚙ Ajustes** | Navegador, vista previa, pantalla principal, atajos de teclado, rendimiento, qué abrir al iniciar y sesiones guardadas. Todo se aplica al instante. |
+| **⚙ Ajustes** | Navegador, fondo de las zonas, vista previa, pantalla principal, atajos de teclado, rendimiento, qué abrir al iniciar y sesiones guardadas. Todo se aplica al instante. |
 
 Botones rápidos de la página **Pantallas**:
 
@@ -240,6 +240,8 @@ Botones rápidos de la página **Pantallas**:
 | **✖ Cerrar todas** | Quita todo lo que se está mostrando. |
 
 Para no usar la laptop como pantalla de monitoreo, activa en **Ajustes** *No usar la pantalla principal*. Para omitir cualquier otro monitor, haz clic en su cuadro y elige **🖥 Monitor → Omitir esta pantalla**.
+
+**Fondo de las zonas:** en **⚙ Ajustes → Pantallas → Fondo** elige **Negro** (el predeterminado) o **Blanco**. Es el color que se ve alrededor de una imagen o un video que no llena toda su zona, en las zonas vacías y en las capturas de los perfiles. Las imágenes que muestra IGP_Soft cambian al instante; las que se abren en el navegador (webp, avif, svg) y los videos lo toman al volver a abrirse.
 
 ### Cambiar el número de los monitores
 
@@ -302,7 +304,7 @@ Un **perfil** recuerda cómo dejaste todo: qué monitores se usan, en cuántas z
 
 **Ver qué tiene un perfil sin abrirlo**
 
-Pulsa la flecha **▾** a la derecha del perfil: la tarjeta se despliega y muestra la **captura de cada monitor** tal como se veía proyectado cuando guardaste el perfil (o cuando pulsaste **⟳ Reemplazar con lo actual**). La captura se toma sola al guardar. Los perfiles guardados antes de esta versión, y la **Última sesión**, no tienen captura: en su lugar se dibuja un esquema de cada monitor con su grilla y lo que se abriría en cada zona; para tener la captura, abre el perfil y pulsa **⟳ Reemplazar con lo actual**. **▴** la vuelve a cerrar. Con el teclado: **→** o **Espacio** la despliegan y **←** la cierra.
+Pulsa la flecha **▾** a la derecha del perfil: la tarjeta se despliega y muestra la **captura de cada monitor** tal como se veía proyectado cuando guardaste el perfil (o cuando pulsaste **⟳ Reemplazar con lo actual**). La captura se toma sola al guardar y solo incluye lo que está en las zonas: las ventanas que estén encima (como el propio IGP_Soft) no aparecen, y lo que una imagen o un video no llena se ve con el fondo elegido en Ajustes. Un monitor que no proyectaba nada se muestra como **Vacío**. Los perfiles guardados antes de esta versión, y la **Última sesión**, no tienen captura: en su lugar se dibuja un esquema de cada monitor con su grilla y lo que se abriría en cada zona; para tener la captura, abre el perfil y pulsa **⟳ Reemplazar con lo actual**. **▴** la vuelve a cerrar. Con el teclado: **→** o **Espacio** la despliegan y **←** la cierra.
 
 **Ordenar perfiles en carpetas**
 

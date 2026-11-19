@@ -69,7 +69,7 @@ internal sealed class PantallasFalsas : IPantallas
     public Task<Resultado> GuardarPerfiles(List<LayoutProfile> perfiles) => Ok($"perfiles {perfiles.Count}");
     public Task<List<VentanaAbierta>> VentanasAbiertas() => Task.FromResult(new List<VentanaAbierta> { new("javaw", "Sistema", "ventana:javaw|Sistema") });
     public Task<List<MonitorFisico>> MonitoresFisicos() => Task.FromResult(new List<MonitorFisico> { new("MON-A-1", 0, 0, 1920, 1080, true) });
-    public Task<byte[]?> VistaPrevia(string monitor, int ancho) => Task.FromResult<byte[]?>(new byte[] { 1, 2, 3 });
+    public Task<byte[]?> VistaPrevia(string monitor, int ancho, bool soloZonas = false) => Task.FromResult<byte[]?>(new byte[] { 1, 2, 3 });
 }
 
 public sealed class ProtocoloPruebas : IDisposable

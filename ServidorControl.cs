@@ -299,7 +299,8 @@ internal sealed class ServidorControl : IDisposable
             case "vista_previa":
             {
                 int ancho = Math.Clamp((int)(Protocolo.Numero(m, "ancho") ?? 240), 80, 640);
-                byte[]? jpeg = await _pantallas.VistaPrevia(Mon(), ancho);
+                bool zonas = string.Equals(Protocolo.Texto(m, "zonas"), "true", StringComparison.OrdinalIgnoreCase);
+                byte[]? jpeg = await _pantallas.VistaPrevia(Mon(), ancho, zonas);
                 if (jpeg is null) return R(Resultado.Falla("sin_imagen"));
                 JsonObject r = R(Resultado.Bien);
                 r["jpeg"] = Convert.ToBase64String(jpeg);
