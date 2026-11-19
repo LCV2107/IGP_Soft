@@ -45,6 +45,7 @@ internal static class LinkStore
                 string url = Normalize(bar >= 0 ? line[(bar + 1)..].Trim() : line);
                 if (url.Length == 0) continue;
                 if (titulo.Length == 0) titulo = TitleFromUrl(url);
+                if (Find(url, list) is not null) continue;
                 list.Add(new LinkDef(Unique(titulo, list), url));
             }
             Links = list.Count > 0 ? list : Defaults.ToList();
@@ -81,6 +82,7 @@ internal static class LinkStore
             string url = Normalize(it.Url);
             if (url.Length == 0) continue;
             string t = string.IsNullOrWhiteSpace(it.Titulo) ? TitleFromUrl(url) : it.Titulo.Trim();
+            if (Find(url, list) is not null) continue;
             list.Add(new LinkDef(Unique(t, list), url));
         }
         if (list.Count > 0) { Links = list; Save(); }
@@ -89,6 +91,7 @@ internal static class LinkStore
     public static LinkDef Add(LinkDef it)
     {
         string url = Normalize(it.Url);
+        if (Find(url, Links) is { } existente) return existente;
         string t = string.IsNullOrWhiteSpace(it.Titulo) ? TitleFromUrl(url) : it.Titulo.Trim();
         var stored = new LinkDef(Unique(t, Links), url);
         Links.Add(stored);
@@ -118,6 +121,19 @@ internal static class LinkStore
         }
         try { var u = new Uri(url); return (u.Host + u.AbsolutePath).TrimEnd('/'); }
         catch { return url; }
+    }
+
+    public static LinkDef? Find(string url, IEnumerable<LinkDef> list)
+    {
+        string clave = Clave(url);
+        return list.FirstOrDefault(l => string.Equals(Clave(l.Url), clave, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string Clave(string url)
+    {
+        url = url.Trim();
+        if (url.Contains("://")) return url.TrimEnd('/');
+        return url.Replace('/', '\\');
     }
 
     private static string Unique(string titulo, List<LinkDef> list)
@@ -1695,6 +1711,7 @@ internal static class NativeMethods
     public const uint SWP_FRAMECHANGED = 0x0020;
     public const uint MONITORINFOF_PRIMARY = 0x1;
     public const uint WM_CLOSE = 0x0010;
+    public const uint WM_APPCOMMAND = 0x0319;
     public const int GWL_STYLE = -16;
     public const long WS_CAPTION = 0x00C00000;
     public const long WS_THICKFRAME = 0x00040000;

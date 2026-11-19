@@ -4,6 +4,19 @@ internal static class PestanasWeb
 {
     public const int Maximo = 6;
 
+    public const string Atras = "atras";
+    public const string Adelante = "adelante";
+    public const string Recargar = "recargar";
+
+    public static bool EsAccion(string? accion) => accion is Atras or Adelante or Recargar;
+
+    public static int ComandoDe(string accion) => accion switch
+    {
+        Atras => 1,
+        Adelante => 2,
+        _ => 3,
+    };
+
     public static bool EsWeb(string? url) =>
         url is not null && Uri.TryCreate(url, UriKind.Absolute, out Uri? u) && u.Scheme is "http" or "https" && u.Host.Length > 0;
 
@@ -24,7 +37,16 @@ internal sealed class BarraPestanas : Control
     public const int Franja = 6;
     private const int Ancho = 260;
     private const int Cabecera = 46;
+    private const int Navegacion = 52;
+    private const int Inicio = Cabecera + Navegacion;
     private const int Fila = 40;
+
+    private static readonly (string Accion, string Icono, string Texto)[] Botones =
+    {
+        (PestanasWeb.Atras, "◀", "Atrás"),
+        (PestanasWeb.Adelante, "▶", "Adelante"),
+        (PestanasWeb.Recargar, "⟳", "Recargar"),
+    };
 
     private readonly System.Windows.Forms.Timer _cerrar = new() { Interval = 350 };
     private Rectangle _zona;
@@ -32,6 +54,7 @@ internal sealed class BarraPestanas : Control
     private int _activa;
     private bool _abierta;
     private int _hover = -1;
+    private int _hoverBoton = -1;
     private bool _hoverCerrar;
 
     public BarraPestanas(int zona)
@@ -46,6 +69,7 @@ internal sealed class BarraPestanas : Control
             _cerrar.Stop();
             _abierta = false;
             _hover = -1;
+            _hoverBoton = -1;
             Ubicar();
         };
     }
@@ -55,6 +79,7 @@ internal sealed class BarraPestanas : Control
     public event Action<BarraPestanas, int>? Activar;
     public event Action<BarraPestanas, int>? Cerrar;
     public event Action<BarraPestanas>? Nueva;
+    public event Action<BarraPestanas, string>? Navegar;
 
     public void Actualizar(Rectangle zona, IReadOnlyList<PestanaVista> pestanas, int activa)
     {
@@ -80,9 +105,15 @@ internal sealed class BarraPestanas : Control
 
     private bool PuedeAgregar => _pestanas.Count < PestanasWeb.Maximo;
 
-    private Rectangle FilaDe(int i) => new(8, Cabecera + i * Fila, Width - 16, Fila - 4);
+    private Rectangle FilaDe(int i) => new(8, Inicio + i * Fila, Width - 16, Fila - 4);
 
-    private Rectangle Agregar => new(8, Cabecera + _pestanas.Count * Fila + 6, Width - 16, Fila - 4);
+    private Rectangle Agregar => new(8, Inicio + _pestanas.Count * Fila + 6, Width - 16, Fila - 4);
+
+    private Rectangle BotonDe(int i)
+    {
+        int ancho = (Width - 16 - 2 * 6) / Botones.Length;
+        return new Rectangle(8 + i * (ancho + 6), Cabecera, ancho, Navegacion - 10);
+    }
 
     private Rectangle CerrarDe(int i)
     {
@@ -108,9 +139,13 @@ internal sealed class BarraPestanas : Control
         for (int i = 0; i < _pestanas.Count; i++)
             if (FilaDe(i).Contains(e.Location)) hover = i;
         if (hover < 0 && Agregar.Contains(e.Location)) hover = _pestanas.Count;
+        int boton = -1;
+        for (int i = 0; i < Botones.Length; i++)
+            if (BotonDe(i).Contains(e.Location)) boton = i;
         bool cerrar = hover >= 0 && hover < _pestanas.Count && CerrarDe(hover).Contains(e.Location);
-        if (hover == _hover && cerrar == _hoverCerrar) return;
+        if (hover == _hover && cerrar == _hoverCerrar && boton == _hoverBoton) return;
         _hover = hover;
+        _hoverBoton = boton;
         _hoverCerrar = cerrar;
         Invalidate();
     }
@@ -119,6 +154,8 @@ internal sealed class BarraPestanas : Control
     {
         base.OnMouseClick(e);
         if (!_abierta || e.Button != MouseButtons.Left) return;
+        for (int i = 0; i < Botones.Length; i++)
+            if (BotonDe(i).Contains(e.Location)) { Navegar?.Invoke(this, Botones[i].Accion); return; }
         for (int i = 0; i < _pestanas.Count; i++)
         {
             if (CerrarDe(i).Contains(e.Location)) { Cerrar?.Invoke(this, i); return; }
@@ -142,6 +179,16 @@ internal sealed class BarraPestanas : Control
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
         TextRenderer.DrawText(g, $"{_pestanas.Count}/{PestanasWeb.Maximo}", Theme.Small, new Rectangle(Width - 60, 0, 44, Cabecera), Theme.SidebarMuted,
             TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+        for (int i = 0; i < Botones.Length; i++)
+        {
+            Rectangle r = BotonDe(i);
+            Theme.FillRound(g, i == _hoverBoton ? Theme.Accent : Theme.SidebarHover, r, 8);
+            var icono = new Rectangle(r.X, r.Y + 2, r.Width, r.Height / 2 + 2);
+            var texto = new Rectangle(r.X, r.Y + r.Height / 2, r.Width, r.Height / 2 - 2);
+            TextRenderer.DrawText(g, Botones[i].Icono, Theme.BodyBold, icono, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g, Botones[i].Texto, Theme.Small, texto, i == _hoverBoton ? Color.White : Theme.SidebarText,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
         for (int i = 0; i < _pestanas.Count; i++)
         {
             Rectangle r = FilaDe(i);

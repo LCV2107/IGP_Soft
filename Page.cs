@@ -54,3 +54,23 @@ internal class Page : UserControl
 
     internal static Panel Gap(int height) => new() { Dock = DockStyle.Top, Height = height, BackColor = Theme.Background };
 }
+
+internal sealed class ListaSinSaltos : FlowLayoutPanel
+{
+    private bool _mostrando;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetKeyState(int tecla);
+
+    private static bool Tabulando => (GetKeyState(0x09) & 0x8000) != 0;
+
+    public void Mostrar(Control c)
+    {
+        _mostrando = true;
+        try { ScrollControlIntoView(c); }
+        finally { _mostrando = false; }
+    }
+
+    protected override Point ScrollToControl(Control activeControl) =>
+        _mostrando || Tabulando ? base.ScrollToControl(activeControl) : DisplayRectangle.Location;
+}

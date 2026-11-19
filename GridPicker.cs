@@ -81,21 +81,22 @@ internal sealed class GridPicker : Control
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
-    public static void Show(Control owner, Point screen, int cols, int rows, Action<int, int> picked, Action? advanced = null)
+    public static void Show(Control owner, Point screen, int cols, int rows, Action<int, int> picked, Action? advanced = null,
+        (string Texto, Action Accion)? volver = null)
     {
         var picker = new GridPicker(cols, rows);
         var host = new ToolStripControlHost(picker) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = picker.Size };
         var drop = new ToolStripDropDown { Padding = Padding.Empty };
         drop.Items.Add(host);
-        if (advanced is not null)
-        {
-            drop.Items.Add(new ToolStripSeparator());
-            drop.Items.Add(new ToolStripMenuItem("▦  Más divisiones y vista previa…", null, (_, _) =>
+        void Agregar(string texto, Action accion) =>
+            drop.Items.Add(new ToolStripMenuItem(texto, null, (_, _) =>
             {
                 drop.Close();
-                owner.BeginInvoke(advanced);
+                owner.BeginInvoke(accion);
             }) { Padding = new Padding(4) });
-        }
+        if (advanced is not null || volver is not null) drop.Items.Add(new ToolStripSeparator());
+        if (advanced is not null) Agregar("▦  Más divisiones y vista previa…", advanced);
+        if (volver is { } v) Agregar("↺  " + v.Texto, v.Accion);
         picker.Picked += (c, r) =>
         {
             drop.Close();

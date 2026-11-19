@@ -242,6 +242,7 @@ internal interface IPantallas
     Task<Resultado> AbrirPestana(string monitor, int zona, LinkDef enlace);
     Task<Resultado> ActivarPestana(string monitor, int zona, int indice);
     Task<Resultado> CerrarPestana(string monitor, int zona, int indice);
+    Task<Resultado> NavegarWeb(string monitor, int zona, string accion);
     Task<Resultado> Ampliar(string monitor, int zona);
     Task<Resultado> Restaurar(string? monitor);
     Task<Resultado> AmpliarSiguiente(string monitor, int paso);

@@ -31,6 +31,7 @@ internal sealed class LayoutProfile
 {
     public string Name { get; set; } = "";
     public string? Browser { get; set; }
+    public string? Carpeta { get; set; }
     public DateTime Saved { get; set; }
     public List<MonitorLayout> Monitors { get; set; } = new();
 
@@ -85,6 +86,8 @@ internal static class ProfileStore
     public static void Put(LayoutProfile profile)
     {
         profile.Name = profile.Name.Trim();
+        if (IsLastSession(profile.Name)) profile.Carpeta = null;
+        else profile.Carpeta ??= Get(profile.Name)?.Carpeta;
         Items.RemoveAll(p => string.Equals(p.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
         Items.Add(profile);
         Save();
@@ -103,6 +106,8 @@ internal static class ProfileStore
         if (Items.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) > 0) Save();
     }
 
+    public static void Guardar() => Save();
+
     private static void Save()
     {
         if (Remote is not null)
@@ -118,6 +123,110 @@ internal static class ProfileStore
         }
         catch { }
     }
+}
+
+internal static class CarpetasPerfiles
+{
+    public const int MaxNombre = 60;
+    private const string Clave = "perfiles.carpetas";
+
+    private static List<string>? _propias;
+
+    public static Action<List<string>> Persistir { get; set; } =
+        l => Config.Set(Clave, JsonSerializer.Serialize(l, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+
+    private static List<string> Propias => _propias ??= Leer();
+
+    private static List<string> Leer()
+    {
+        try
+        {
+            if (Config.Get(Clave) is { Length: > 0 } v && JsonSerializer.Deserialize<List<string>>(v) is { } l)
+                return Limpias(l);
+        }
+        catch { }
+        return new();
+    }
+
+    public static void Fijar(IEnumerable<string> carpetas) => _propias = Limpias(carpetas);
+
+    private static List<string> Limpias(IEnumerable<string?> l) =>
+        l.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c!.Trim()).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    private static void GuardarPropias() => Persistir(Propias.ToList());
+
+    public static IReadOnlyList<string> Todas => Limpias(Propias.Concat(ProfileStore.Items.Where(p => !ProfileStore.IsLastSession(p.Name)).Select(p => p.Carpeta)))
+        .OrderBy(c => c, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    private static string? Existente(string nombre) =>
+        Todas.FirstOrDefault(c => c.Equals(nombre.Trim(), StringComparison.CurrentCultureIgnoreCase));
+
+    private static bool Igual(string? a, string? b) => a is not null && b is not null && a.Equals(b, StringComparison.CurrentCultureIgnoreCase);
+
+    public static string? Validar(string nombre, string? actual = null)
+    {
+        nombre = nombre.Trim();
+        if (nombre.Length == 0) return "Escribe un nombre para la carpeta.";
+        if (nombre.Length > MaxNombre) return $"El nombre puede tener hasta {MaxNombre} caracteres.";
+        if (Existente(nombre) is { } e && !Igual(e, actual)) return $"Ya existe la carpeta «{e}».";
+        return null;
+    }
+
+    public static bool Crear(string nombre)
+    {
+        if (Validar(nombre) is not null) return false;
+        Propias.Add(nombre.Trim());
+        GuardarPropias();
+        return true;
+    }
+
+    public static bool Renombrar(string actual, string nuevo)
+    {
+        if (Existente(actual) is not { } viejo || Validar(nuevo, viejo) is not null) return false;
+        nuevo = nuevo.Trim();
+        Propias.RemoveAll(c => Igual(c, viejo));
+        Propias.Add(nuevo);
+        GuardarPropias();
+        foreach (LayoutProfile p in ProfileStore.Items.Where(p => Igual(p.Carpeta, viejo))) p.Carpeta = nuevo;
+        ProfileStore.Guardar();
+        return true;
+    }
+
+    public static void Eliminar(string nombre)
+    {
+        if (Existente(nombre) is not { } c) return;
+        Propias.RemoveAll(x => Igual(x, c));
+        GuardarPropias();
+        bool cambio = false;
+        foreach (LayoutProfile p in ProfileStore.Items.Where(p => Igual(p.Carpeta, c)))
+        {
+            p.Carpeta = null;
+            cambio = true;
+        }
+        if (cambio) ProfileStore.Guardar();
+    }
+
+    public static void Mover(IEnumerable<string> perfiles, string? carpeta)
+    {
+        string? destino = carpeta is null ? null : Existente(carpeta);
+        if (carpeta is not null && destino is null) return;
+        if (destino is not null && !Propias.Any(c => Igual(c, destino)))
+        {
+            Propias.Add(destino);
+            GuardarPropias();
+        }
+        bool cambio = false;
+        foreach (string nombre in perfiles)
+            if (ProfileStore.Get(nombre) is { } p && !ProfileStore.IsLastSession(p.Name) && !string.Equals(p.Carpeta, destino, StringComparison.CurrentCulture))
+            {
+                p.Carpeta = destino;
+                cambio = true;
+            }
+        if (cambio) ProfileStore.Guardar();
+    }
+
+    public static int Cantidad(string carpeta) =>
+        ProfileStore.Items.Count(p => !ProfileStore.IsLastSession(p.Name) && Igual(p.Carpeta, carpeta));
 }
 
 internal static class Startup

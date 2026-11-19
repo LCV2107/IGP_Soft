@@ -224,7 +224,10 @@ internal sealed class MainForm : Form
             ApplyProfile(p);
             ShowPage(_screensPage);
         })
-        { StartupLocal = !Remoto };
+        {
+            StartupLocal = !Remoto,
+            Capturar = CapturarMonitores,
+        };
 
         var pages = new List<(string, string, Page)> { ("▦", "Pantallas", _screensPage), ("☰", "Enlaces", _linksPage) };
         if (!Remoto)
@@ -379,6 +382,7 @@ internal sealed class MainForm : Form
     {
         if (e.Seq < _estado.Seq && e.Equipo == _estado.Equipo) return;
         _estado = e;
+        _panelZona?.Actualizar();
         if (Remoto)
         {
             LinkStore.SetFromRemote(e.Enlaces);
@@ -771,7 +775,7 @@ internal sealed class MainForm : Form
         if (_settingsPage is null) return;
         if (!Visible) ShowFromTray();
         ShowPage(_settingsPage);
-        if (_settingsPage.UpdatesCard is { } card && card.Parent is ScrollableControl sc) sc.ScrollControlIntoView(card);
+        if (_settingsPage.UpdatesCard is { } card && card.Parent is ListaSinSaltos sc) sc.Mostrar(card);
     }
 
     private async Task CheckForUpdatesQuietly()
@@ -937,6 +941,10 @@ internal sealed class MainForm : Form
             case "bloqueartodos":
                 _ = _p.Bloquear(null, !_estado.TodosBloqueados);
                 break;
+            case "webatras" or "webadelante" or "webrecargar":
+                if (under is not null && under.Usables.FirstOrDefault(z => z.Web && new Rectangle(z.X, z.Y, z.Ancho, z.Alto).Contains(Cursor.Position)) is { } w)
+                    _ = _p.NavegarWeb(under.Id, w.Zona, key switch { "webatras" => PestanasWeb.Atras, "webadelante" => PestanasWeb.Adelante, _ => PestanasWeb.Recargar });
+                break;
         }
     }
 
@@ -956,7 +964,18 @@ internal sealed class MainForm : Form
         menu.Show(Cursor.Position);
     }
 
-    private async void ShowSegmentMenu(MonitorTile view, EstadoZona zona)
+    private PanelZonaForm? _panelZona;
+
+    private async Task<IReadOnlyList<(int Numero, byte[] Jpeg)>> CapturarMonitores()
+    {
+        var lista = new List<(int, byte[])>();
+        foreach (EstadoMonitor m in _estado.Monitores.Where(m => !m.Omitido).OrderBy(m => m.Numero).ToList())
+            if (await _p.VistaPrevia(m.Id, CapturasPerfiles.Ancho) is { Length: > 0 } jpeg)
+                lista.Add((m.Numero, jpeg));
+        return lista;
+    }
+
+    private void ShowSegmentMenu(MonitorTile view, EstadoZona zona)
     {
         EstadoMonitor m = view.Data;
         if (_estado.Navegador is null)
@@ -965,64 +984,90 @@ internal sealed class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        _panelZona?.Close();
+        var panel = new PanelZonaForm(() => _estado, m.Id, zona.Zona, AccionesDeZona, PieDeZona, (mon, z, link) => Open(mon.Id, z.Zona, link));
+        panel.FormClosed += (_, _) => { if (_panelZona == panel) _panelZona = null; };
+        _panelZona = panel;
+        panel.MostrarEn(Cursor.Position, this);
+    }
 
-        bool abriendo = zona.Estado == EstadosZona.Abriendo;
-        List<VentanaAbierta> ventanas = zona.Desactivada || abriendo ? new() : await _p.VentanasAbiertas();
-        if (IsDisposed) return;
+    private static string? Atajo(string clave)
+    {
+        Keys k = Hotkeys.Get(Hotkeys.Actions.First(a => a.Key == clave));
+        return k == Keys.None ? null : Hotkeys.Format(k);
+    }
 
-        var menu = Theme.Menu();
+    private string? Ayuda(string texto, string clave) => !Remoto && Atajo(clave) is { } a ? $"{texto}  ·  Atajo: {a}" : texto;
+
+    private IReadOnlyList<AccionZona> AccionesDeZona(EstadoMonitor m, EstadoZona zona)
+    {
+        var lista = new List<AccionZona>();
         int usable = m.Usables.Count();
-        string label = zona.Desactivada ? " · zona sin usar" : usable > 1 ? $" · zona {m.NumeroVisible(zona)}/{usable}" : "";
-        menu.Items.Add(new ToolStripLabel($"Monitor {m.Numero}{label}") { Enabled = false });
-        menu.Items.Add(new ToolStripSeparator());
-
         if (zona.Desactivada)
         {
-            menu.Items.Add(new ToolStripMenuItem("✓  Usar esta zona", null, (_, _) => ToggleZone(m, zona)));
-            menu.Items.Add(new ToolStripMenuItem("▦  Diseñar grilla de este monitor…", null, (_, _) => EditLayout(m)));
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(MonitorSubmenu(m));
-            menu.Show(Cursor.Position);
-            return;
+            lista.Add(new AccionZona("✓", "Usar esta zona", _ => ToggleZone(m, zona), Ayuda: "Vuelve a usar esta zona para mostrar algo en ella."));
         }
-
-        if (zona.Estado is EstadosZona.EnPantalla or EstadosZona.Abriendo or EstadosZona.Borrador)
+        else
         {
-            menu.Items.Add(new ToolStripMenuItem(
-                abriendo ? "✖  Cancelar apertura"
-                : zona.Estado == EstadosZona.Borrador ? "✖  Quitar de esta zona"
-                : zona.Adjunta ? "↩  Soltar ventana (devolverla al escritorio)"
-                : "✖  Cerrar esta ventana", null, (_, _) => _ = _p.Cerrar(m.Id, zona.Zona)));
+            bool abriendo = zona.Estado == EstadosZona.Abriendo;
+            if (zona.Estado is EstadosZona.EnPantalla or EstadosZona.Abriendo or EstadosZona.Borrador)
+                lista.Add(new AccionZona("✕",
+                    abriendo ? "Cancelar" : zona.Estado == EstadosZona.Borrador ? "Quitar" : zona.Adjunta ? "Soltar ventana" : "Cerrar",
+                    _ => _p.Cerrar(m.Id, zona.Zona), Peligro: true,
+                    Ayuda: abriendo ? "Cancela la apertura." : zona.Adjunta ? "Devuelve la ventana al escritorio." : "Cierra lo que muestra esta zona."));
+            if (usable > 1 && !m.Bloqueado)
+                lista.Add(m.Ampliada == zona.Zona
+                    ? new AccionZona("⤡", "Volver a la grilla", _ => _p.Restaurar(m.Id), Ayuda: Ayuda("Vuelve a mostrar todas las zonas.", "restaurar"))
+                    : new AccionZona("⤢", "Ampliar", _ => _p.Ampliar(m.Id, zona.Zona), zona.Ocupada, Ayuda("Muestra esta zona en todo el monitor.", "ampliar")));
+            if (zona.Web)
+            {
+                lista.Add(new AccionZona("◀", "Atrás", _ => _p.NavegarWeb(m.Id, zona.Zona, PestanasWeb.Atras), Cierra: false, Ayuda: Ayuda("Página anterior.", "webatras")));
+                lista.Add(new AccionZona("▶", "Adelante", _ => _p.NavegarWeb(m.Id, zona.Zona, PestanasWeb.Adelante), Cierra: false, Ayuda: Ayuda("Página siguiente.", "webadelante")));
+                lista.Add(new AccionZona("⟳", "Recargar", _ => _p.NavegarWeb(m.Id, zona.Zona, PestanasWeb.Recargar), Cierra: false, Ayuda: Ayuda("Vuelve a cargar la página.", "webrecargar")));
+                lista.Add(new AccionZona("▤", $"Pestañas ({zona.CantidadPestanas})", c => PanelZonaForm.MostrarSubmenu(PestanasSubmenu(m, zona), c), Cierra: false,
+                    Ayuda: "Cambiar, abrir o cerrar pestañas de esta zona."));
+            }
         }
+        lista.Add(new AccionZona("▦", "Grilla", c => PanelZonaForm.MostrarSubmenu(GrillaSubmenu(m, zona), c), Cierra: false,
+            Ayuda: "Diseñar la grilla, volver a 1 zona o dejar de usar esta zona."));
+        lista.Add(new AccionZona("🖥", "Monitor", c => PanelZonaForm.MostrarSubmenu(MonitorSubmenu(m), c), Cierra: false,
+            Ayuda: "Bloquear, omitir o cerrar todo en este monitor."));
+        return lista;
+    }
 
-        if (usable > 1 && !m.Bloqueado)
+    private IReadOnlyList<AccionZona> PieDeZona(EstadoMonitor m, EstadoZona zona)
+    {
+        if (zona.Desactivada || zona.Estado == EstadosZona.Abriendo) return Array.Empty<AccionZona>();
+        return new[]
         {
-            ToolStripMenuItem ampliar = m.Ampliada == zona.Zona
-                ? new ToolStripMenuItem("⤡  Volver a la grilla", null, (_, _) => _ = _p.Restaurar(m.Id))
-                : new ToolStripMenuItem("⤢  Ampliar a todo el monitor", null, (_, _) => _ = _p.Ampliar(m.Id, zona.Zona)) { Enabled = zona.Ocupada };
-            HotkeyAction act = Hotkeys.Actions[m.Ampliada == zona.Zona ? 1 : 0];
-            if (Hotkeys.Get(act) != Keys.None && !Remoto) ampliar.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(act));
-            menu.Items.Add(ampliar);
+            new AccionZona("＋", "Agregar archivo o URL…", _ => AddCustomElement(m, zona), Ayuda: "Uno o varios archivos, o una dirección web. Si eliges varios, se reparten en el monitor."),
+            new AccionZona("▣", "Adjuntar ventana…", c => MostrarVentanas(m, zona, c), Cierra: false, Ayuda: "Mostrar en esta zona una ventana que ya está abierta."),
+        };
+    }
+
+    private async void MostrarVentanas(EstadoMonitor m, EstadoZona zona, Control junto)
+    {
+        List<VentanaAbierta> ventanas = await _p.VentanasAbiertas();
+        if (junto.IsDisposed) return;
+        PanelZonaForm.MostrarSubmenu(BuildAttachMenu(m, zona, ventanas, false), junto);
+    }
+
+    private ToolStripMenuItem GrillaSubmenu(EstadoMonitor m, EstadoZona zona)
+    {
+        var sub = new ToolStripMenuItem("▦  Grilla");
+        sub.DropDownItems.Add(new ToolStripMenuItem("▦  Diseñar grilla de este monitor…", null, (_, _) => EditLayout(m)));
+        sub.DropDownItems.Add(new ToolStripMenuItem("↺  Volver a 1 zona", null, (_, _) => VolverAUnaZona(m)) { Enabled = !EsInicial(m) });
+        if (_estado.Monitores.Count(x => !x.Omitido) > 1)
+            sub.DropDownItems.Add(new ToolStripMenuItem("↺  Volver todos los monitores a 1 zona", null, (_, _) => VolverAUnaZona(null))
+            {
+                Enabled = _estado.Monitores.Any(x => !x.Omitido && !EsInicial(x)),
+            });
+        if (m.Zonas.Count > 1 && !zona.Desactivada)
+        {
+            sub.DropDownItems.Add(new ToolStripSeparator());
+            sub.DropDownItems.Add(new ToolStripMenuItem("⊘  No usar esta zona", null, (_, _) => ToggleZone(m, zona)) { Enabled = m.Usables.Count() > 1 });
         }
-        if (menu.Items.Count > 2) menu.Items.Add(new ToolStripSeparator());
-
-        menu.Items.Add(LinksSubmenu(m, zona, abriendo));
-        var agregar = new ToolStripMenuItem("➕  Agregar") { Enabled = !abriendo };
-        agregar.DropDownItems.Add(new ToolStripMenuItem("Archivo o URL…", null, (_, _) => AddCustomElement(m, zona)));
-        agregar.DropDownItems.Add(new ToolStripMenuItem("Varios archivos (repartir en el monitor)…", null, (_, _) => ElegirVarios(m)));
-        agregar.DropDownItems.Add(BuildAttachMenu(m, zona, ventanas, abriendo));
-        menu.Items.Add(agregar);
-        if (zona.Web) menu.Items.Add(PestanasSubmenu(m, zona));
-        menu.Items.Add(new ToolStripSeparator());
-
-        var zonaMenu = new ToolStripMenuItem("▢  Zona");
-        if (m.Zonas.Count > 1)
-            zonaMenu.DropDownItems.Add(new ToolStripMenuItem("⊘  No usar esta zona", null, (_, _) => ToggleZone(m, zona)) { Enabled = usable > 1 });
-        zonaMenu.DropDownItems.Add(new ToolStripMenuItem("▦  Diseñar grilla de este monitor…", null, (_, _) => EditLayout(m)));
-        menu.Items.Add(zonaMenu);
-        menu.Items.Add(MonitorSubmenu(m));
-
-        menu.Show(Cursor.Position);
+        return sub;
     }
 
     private ToolStripMenuItem PestanasSubmenu(EstadoMonitor m, EstadoZona zona)
@@ -1053,54 +1098,6 @@ internal sealed class MainForm : Form
         _ = _p.AbrirPestana(m.Id, zona.Zona, link);
     }
 
-    private ToolStripMenuItem LinksSubmenu(EstadoMonitor m, EstadoZona zona, bool abriendo)
-    {
-        var abrir = new ToolStripMenuItem("☰  Abrir enlace") { Enabled = !abriendo };
-        List<LinkDef> links = LinkStore.Links.ToList();
-        bool agrupar = links.Count > 15;
-        var grupos = new Dictionary<string, ToolStripMenuItem>();
-        foreach (LinkDef link in links)
-        {
-            bool aqui = string.Equals(zona.Url, link.Url, StringComparison.Ordinal);
-            bool enOtro = _estado.EstaAbierto(link.Url) && !aqui;
-            var item = new ToolStripMenuItem(link.Titulo.Replace("&", "&&"))
-            {
-                Checked = aqui,
-                Enabled = !enOtro && !aqui,
-            };
-            if (enOtro) item.Text += "   (ya abierto)";
-            LinkDef captured = link;
-            item.Click += (_, _) => Open(m.Id, zona.Zona, captured);
-            if (!agrupar) { abrir.DropDownItems.Add(item); continue; }
-            string grupo = GrupoDe(link.Url);
-            if (!grupos.TryGetValue(grupo, out ToolStripMenuItem? g))
-                grupos[grupo] = g = new ToolStripMenuItem(grupo);
-            g.DropDownItems.Add(item);
-        }
-        foreach (string nombre in new[] { "Páginas web", "Imágenes", "Videos", "Documentos", "Ventanas", "Otros" })
-            if (grupos.TryGetValue(nombre, out ToolStripMenuItem? g))
-            {
-                g.Text += $"   ({g.DropDownItems.Count})";
-                abrir.DropDownItems.Add(g);
-            }
-        if (abrir.DropDownItems.Count == 0)
-            abrir.DropDownItems.Add(new ToolStripMenuItem("(no hay enlaces en la lista)") { Enabled = false });
-        return abrir;
-    }
-
-    private static string GrupoDe(string url)
-    {
-        if (WindowManager.IsWindowSpec(url)) return "Ventanas";
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return "Páginas web";
-        if (Documentos.Nombre(url) is not null) return "Documentos";
-        return Thumbnails.KindOf(url) switch
-        {
-            MediaKind.Image => "Imágenes",
-            MediaKind.Video => "Videos",
-            _ => "Otros",
-        };
-    }
-
     private ToolStripMenuItem MonitorSubmenu(EstadoMonitor m)
     {
         var sub = new ToolStripMenuItem("🖥  Monitor");
@@ -1109,10 +1106,13 @@ internal sealed class MainForm : Form
         HotkeyAction accion = Hotkeys.Actions.First(a => a.Key == "bloquear");
         if (Hotkeys.Get(accion) != Keys.None && !Remoto) bloquear.ShortcutKeyDisplayString = Hotkeys.Format(Hotkeys.Get(accion));
         sub.DropDownItems.Add(bloquear);
-        sub.DropDownItems.Add(new ToolStripMenuItem(_estado.TodosBloqueados ? "🔓  Desbloquear todos los monitores" : "🔒  Bloquear todos los monitores", null,
-            (_, _) => _ = _p.Bloquear(null, !_estado.TodosBloqueados)));
-        if (_estado.HayBloqueados && !_estado.TodosBloqueados)
-            sub.DropDownItems.Add(new ToolStripMenuItem("🔓  Desbloquear todos los monitores", null, (_, _) => _ = _p.Bloquear(null, false)));
+        if (_estado.Monitores.Count(x => !x.Omitido) > 1)
+        {
+            sub.DropDownItems.Add(new ToolStripMenuItem(_estado.TodosBloqueados ? "🔓  Desbloquear todos los monitores" : "🔒  Bloquear todos los monitores", null,
+                (_, _) => _ = _p.Bloquear(null, !_estado.TodosBloqueados)));
+            if (_estado.HayBloqueados && !_estado.TodosBloqueados)
+                sub.DropDownItems.Add(new ToolStripMenuItem("🔓  Desbloquear todos los monitores", null, (_, _) => _ = _p.Bloquear(null, false)));
+        }
         sub.DropDownItems.Add(new ToolStripSeparator());
         sub.DropDownItems.Add(new ToolStripMenuItem("Omitir esta pantalla", null, (_, _) => _ = _p.AlternarOmitir(m.Id)));
         var close = new ToolStripMenuItem("✕  Cerrar todo en este monitor", null, (_, _) => _ = _p.CerrarMonitor(m.Id))
@@ -1316,7 +1316,31 @@ internal sealed class MainForm : Form
     private void ShowGridPicker(MonitorTile view, Point screen)
     {
         EstadoMonitor m = view.Data;
-        GridPicker.Show(this, screen, m.Columnas, m.Filas, (c, r) => _ = _p.CambiarGrilla(m.Id, GridLayout.Uniform(c, r)), () => EditLayout(m));
+        GridPicker.Show(this, screen, m.Columnas, m.Filas, (c, r) => _ = _p.CambiarGrilla(m.Id, GridLayout.Uniform(c, r)), () => EditLayout(m),
+            ("Volver a 1 zona", () => VolverAUnaZona(m)));
+    }
+
+    private static bool EsInicial(EstadoMonitor m) => m.Layout().SameAs(GridLayout.Inicial) && m.Ampliada is null;
+
+    private static int SeCerrarian(EstadoMonitor m) =>
+        GridLayout.SeCerrarian(m.Layout(), m.Zonas.Where(z => z.Ocupada).Select(z => z.Zona), GridLayout.Inicial);
+
+    private void VolverAUnaZona(EstadoMonitor? m)
+    {
+        List<EstadoMonitor> monitores = m is not null ? new() { m } : _estado.Monitores.Where(x => !x.Omitido).ToList();
+        monitores = monitores.Where(x => !EsInicial(x)).ToList();
+        if (monitores.Count == 0) return;
+        int cerrar = monitores.Sum(SeCerrarian);
+        if (cerrar > 0 && MessageBox.Show(this,
+                (m is not null ? $"El monitor {m.Numero} volverá a 1 zona." : "Todos los monitores volverán a 1 zona.") + "\n\n" +
+                $"Se {(cerrar == 1 ? "cerrará 1 zona" : $"cerrarán {cerrar} zonas")} con contenido. Lo que está en la zona de arriba a la izquierda se conserva.\n\n¿Continuar?",
+                "Volver a 1 zona", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+            return;
+        foreach (EstadoMonitor x in monitores)
+        {
+            if (x.Ampliada is not null) _ = _p.Restaurar(x.Id);
+            _ = _p.CambiarGrilla(x.Id, GridLayout.Inicial);
+        }
     }
 
     private void EditLayout(EstadoMonitor m)
@@ -1332,7 +1356,8 @@ internal sealed class MainForm : Form
     {
         EstadoMonitor? first = _estado.Monitores.OrderBy(m => m.Numero).FirstOrDefault(m => !m.Omitido);
         if (first is null) return;
-        GridPicker.Show(this, anchor.PointToScreen(new Point(anchor.Width, 0)), first.Columnas, first.Filas, (c, r) => _ = _p.DividirTodos(c, r));
+        GridPicker.Show(this, anchor.PointToScreen(new Point(anchor.Width, 0)), first.Columnas, first.Filas, (c, r) => _ = _p.DividirTodos(c, r),
+            volver: ("Volver todos a 1 zona", () => VolverAUnaZona(null)));
     }
 
     private async void CloseAll()
@@ -1347,12 +1372,18 @@ internal sealed class MainForm : Form
     private void FillProfileMenu(ToolStripMenuItem parent)
     {
         parent.DropDownItems.Clear();
-        foreach (LayoutProfile p in ProfileStore.Get(ProfileStore.LastSession) is { } last
-                     ? ProfileStore.Named.Prepend(last) : ProfileStore.Named)
+        ToolStripMenuItem Item(LayoutProfile p) => new(p.Name.Replace("&", "&&"), null, (_, _) => ApplyProfile(p));
+        if (ProfileStore.Get(ProfileStore.LastSession) is { } last) parent.DropDownItems.Add(Item(last));
+        List<LayoutProfile> named = ProfileStore.Named.ToList();
+        foreach (IGrouping<string, LayoutProfile> g in named.Where(p => p.Carpeta is not null)
+                     .GroupBy(p => p.Carpeta!, StringComparer.CurrentCultureIgnoreCase)
+                     .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
         {
-            LayoutProfile captured = p;
-            parent.DropDownItems.Add(new ToolStripMenuItem(p.Name, null, (_, _) => ApplyProfile(captured)));
+            var carpeta = new ToolStripMenuItem("▤  " + g.Key.Replace("&", "&&"));
+            foreach (LayoutProfile p in g) carpeta.DropDownItems.Add(Item(p));
+            parent.DropDownItems.Add(carpeta);
         }
+        foreach (LayoutProfile p in named.Where(p => p.Carpeta is null)) parent.DropDownItems.Add(Item(p));
         if (parent.DropDownItems.Count == 0)
             parent.DropDownItems.Add(new ToolStripMenuItem("(no hay perfiles guardados)") { Enabled = false });
     }

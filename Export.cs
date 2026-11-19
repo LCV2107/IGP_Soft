@@ -33,6 +33,7 @@ internal static class ProjectFiles
             if (File.Exists(full)) list.Add(new ProjectFile(full, name));
         }
         AddFolder(list, AssetStore.FolderName);
+        AddFolder(list, CapturasPerfiles.NombreCarpeta);
         if (includeSessions) AddFolder(list, SessionsFolder);
 
         if (includeProgram)

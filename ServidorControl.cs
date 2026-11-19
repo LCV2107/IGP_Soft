@@ -253,6 +253,7 @@ internal sealed class ServidorControl : IDisposable
             }
             case "pestana_activar": return R(await _pantallas.ActivarPestana(Mon(), Zona(), (int)(Protocolo.Numero(m, "indice") ?? -1)));
             case "pestana_cerrar": return R(await _pantallas.CerrarPestana(Mon(), Zona(), (int)(Protocolo.Numero(m, "indice") ?? -1)));
+            case "web_navegar": return R(await _pantallas.NavegarWeb(Mon(), Zona(), Protocolo.Texto(m, "accion") ?? ""));
             case "bloquear": return R(await _pantallas.Bloquear(Protocolo.Texto(m, "monitor"), Protocolo.Leer<bool>(m, "valor")));
             case "ampliar": return R(await _pantallas.Ampliar(Mon(), Zona()));
             case "restaurar": return R(await _pantallas.Restaurar(Protocolo.Texto(m, "monitor")));

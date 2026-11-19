@@ -31,7 +31,7 @@ internal sealed class SettingsPage : Page
     public SettingsPage(ComboBox browser, ToggleSwitch preview, ToggleSwitch skipPrimary, Action reloadNow, Action restartForUpdate)
         : base("Ajustes", "Todo se aplica y se guarda al instante.")
     {
-        var flow = new FlowLayoutPanel
+        var flow = new ListaSinSaltos
         {
             Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true,
             BackColor = Theme.Background, Padding = new Padding(0, 0, 0, 12),

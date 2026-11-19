@@ -3,6 +3,35 @@ namespace IGP_Soft.Pruebas;
 public class GrillasPruebas
 {
     [Fact]
+    public void El_estado_inicial_es_una_zona()
+    {
+        GridLayout g = GridLayout.Inicial;
+        Assert.Equal(1, g.Cols);
+        Assert.Equal(1, g.Rows);
+        Assert.Single(g.Zones);
+        Assert.Equal(1, g.ActiveCount);
+    }
+
+    [Fact]
+    public void Volver_a_una_zona_conserva_la_de_arriba_a_la_izquierda()
+    {
+        GridLayout g = GridLayout.Uniform(3, 2);
+        Assert.Equal(2, GridLayout.SeCerrarian(g, new[] { 0, 1, 4 }, GridLayout.Inicial));
+        Assert.Equal(2, GridLayout.SeCerrarian(g, new[] { 1, 4 }, GridLayout.Inicial));
+        Assert.Equal(0, GridLayout.SeCerrarian(g, new[] { 0 }, GridLayout.Inicial));
+        Assert.Equal(0, GridLayout.SeCerrarian(g, Array.Empty<int>(), GridLayout.Inicial));
+        Assert.Equal(1, GridLayout.SeCerrarian(g, new[] { 0, 0, 5, 9 }, GridLayout.Inicial));
+    }
+
+    [Fact]
+    public void Volver_a_una_zona_deshace_uniones_y_zonas_sin_usar()
+    {
+        GridLayout unida = GridLayout.TryCreate(2, 2, new[] { new ZoneSpec(0, 0, 2, 1), new ZoneSpec(0, 1), new ZoneSpec(1, 1, Off: true) })!;
+        Assert.False(unida.SameAs(GridLayout.Inicial));
+        Assert.Equal(1, GridLayout.SeCerrarian(unida, new[] { 0, 1 }, GridLayout.Inicial));
+    }
+
+    [Fact]
     public void Uniforme_crea_una_zona_por_celda_en_orden()
     {
         GridLayout g = GridLayout.Uniform(3, 2);

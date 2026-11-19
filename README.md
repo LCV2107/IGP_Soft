@@ -33,24 +33,34 @@ Descarga la última versión desde [Releases](https://github.com/LCV2107/IGP_Sof
 
 ## 2. Poner una pantalla en un monitor
 
-1. Haz clic en el cuadro del monitor.
-2. Elige un enlace del menú. Se abre al instante a pantalla completa en ese monitor.
+1. Haz clic en el cuadro del monitor (o en una de sus zonas).
+2. En el panel de la zona, haz clic en lo que quieres mostrar. Se abre al instante a pantalla completa en ese monitor.
 3. La zona muestra una etiqueta con el nombre del enlace: punto **verde** cuando ya está en pantalla, **amarillo** mientras se abre. El borde del monitor se pone verde cuando tiene algo en vivo.
 
-Para cambiarlo, vuelve a hacer clic en el cuadro y elige otro enlace. Para quitarlo, elige **✖ Cerrar esta ventana**.
+Para cambiarlo, vuelve a hacer clic en la zona y elige otra cosa. Para quitarlo, pulsa **✕ Cerrar**.
 
-### El menú de una zona
+### El panel de una zona
 
-Al hacer clic en una zona aparece un menú corto. Arriba están las acciones más usadas; lo demás está agrupado en submenús:
+Al hacer clic en una zona se abre un panel junto al mouse:
 
-| Opción | Qué contiene |
-|--------|--------------|
-| **✖ Cerrar esta ventana** · **⤢ Ampliar a todo el monitor** | Directas, sin submenú. |
-| **☰ Abrir enlace ▸** | La lista de enlaces. Si son muchos, aparecen agrupados en *Páginas web*, *Imágenes*, *Videos*, *Documentos* y *Ventanas*. |
-| **➕ Agregar ▸** | *Archivo o URL…*, *Varios archivos (repartir en el monitor)…* y *Adjuntar ventana abierta*. |
-| **▤ Pestañas ▸** | Solo en zonas con una página web (ver punto 4). |
-| **▢ Zona ▸** | *No usar esta zona* y *Diseñar grilla de este monitor…* |
-| **🖥 Monitor ▸** | *Bloquear proyección*, *Bloquear todos los monitores*, *Omitir esta pantalla*, *Cerrar todo en este monitor* y, si corresponde, *Separar monitores combinados* y *Restablecer numeración*. |
+- **Arriba**: el monitor, la zona (con un dibujito de la grilla donde la zona elegida está en azul) y lo que muestra ahora.
+- **Botones grandes** con lo más usado:
+
+| Botón | Qué hace |
+|-------|----------|
+| **✕ Cerrar** | Cierra lo que muestra la zona (en una ventana adjunta dice *Soltar ventana* y la devuelve al escritorio). |
+| **⤢ Ampliar** / **⤡ Volver a la grilla** | Muestra la zona en todo el monitor, o la devuelve a su lugar. |
+| **◀ Atrás** · **▶ Adelante** · **⟳ Recargar** | Solo en páginas web. El panel queda abierto para pulsarlos varias veces. |
+| **▤ Pestañas** | Solo en páginas web: cambiar, abrir o cerrar pestañas (ver punto 4). |
+| **▦ Grilla** | *Diseñar grilla de este monitor…*, *Volver a 1 zona*, *Volver todos los monitores a 1 zona* y *No usar esta zona*. |
+| **🖥 Monitor** | *Bloquear proyección*, *Omitir esta pantalla*, *Cerrar todo en este monitor* y, si hay varios monitores o corresponde, *Bloquear todos los monitores*, *Separar monitores combinados* y *Restablecer numeración*. |
+
+- **Qué mostrar**: tu lista de enlaces como tarjetas, con la miniatura de las imágenes, videos y documentos y un icono de color según el tipo. Escribe para **buscar** y usa los filtros **Todo**, **Páginas web**, **Imágenes**, **Videos**, **Documentos** y **Ventanas**. Lo que ya está en esta zona dice *✓ En esta zona*; lo que está abierto en otra zona aparece atenuado con *En monitor N · zona N*.
+- **Abajo**: **＋ Agregar archivo o URL…** (uno o varios archivos; si eliges varios se reparten en el monitor) y **▣ Adjuntar ventana…**.
+
+**Llenar un monitor sin volver a abrir el panel:** activa **Seguir con la siguiente zona**. Cada vez que eliges algo, el panel pasa solo a la siguiente zona libre del monitor (el dibujito de arriba marca cuál). Cuando no quedan zonas libres, se cierra. La opción se recuerda.
+
+**Con el teclado:** escribe para buscar, **↓** o **Enter** para pasar a las tarjetas, flechas para moverte, **Enter** para elegir y **Esc** para cerrar el panel. El panel también se cierra al hacer clic fuera de él.
 
 ### Bloquear la proyección mientras organizas (candado)
 
@@ -64,7 +74,7 @@ Para bloquear o desbloquear **todos** los monitores a la vez: clic en una zona �
 
 Puedes hacer clic y usar normalmente lo que se muestra en cada zona (desplazarte, abrir menús, escribir), pero las ventanas quedan fijas en su lugar: no se pueden mover ni cambiar de tamaño.
 
-Un enlace solo se puede abrir en un lugar a la vez: si ya está abierto, aparece como *(ya abierto)* en los demás monitores.
+Un enlace solo se puede abrir en un lugar a la vez: si ya está abierto, en el panel de las demás zonas aparece atenuado con el monitor donde está. La lista de enlaces no guarda dos veces el mismo archivo o la misma dirección: si abres algo con «Agregar a la lista» y ya estaba, se usa el que ya existe.
 
 ## 3. Dividir un monitor en una grilla
 
@@ -79,6 +89,8 @@ Puedes elegir cualquier combinación, desde **1 × 1** (pantalla completa) hasta
 - Las zonas que dejan de existir se cierran.
 - Para dividir **todos los monitores igual**, usa **▦ Dividir todos…** arriba de los monitores.
 
+**Volver al estado inicial (1 zona):** en el **⊞** de un monitor, pulsa **↺ Volver a 1 zona**; para todos los monitores, **▦ Dividir todos → ↺ Volver todos a 1 zona**. También está en el panel de la zona → **▦ Grilla**. Quedan en 1 zona, sin uniones, con todas las zonas en uso y sin zona ampliada. Se conserva lo que había en la zona de arriba a la izquierda; si se cerraría algo más, IGP_Soft pregunta antes cuántas zonas se cerrarían.
+
 Cada zona funciona como una pantalla aparte: haz clic en ella y elige qué mostrar. La grilla de cada monitor se guarda en los perfiles.
 
 ### Diseñador de grilla: divisiones de un clic y vista previa
@@ -86,7 +98,7 @@ Cada zona funciona como una pantalla aparte: haz clic en ella y elige qué mostr
 Para ver cómo quedará antes de cambiar las pantallas, o para armar zonas de distintos tamaños, abre el **diseñador de grilla**:
 
 - Clic en **⊞** → **▦ Más divisiones y vista previa…**, o
-- Clic en cualquier zona → **▢ Zona → ▦ Diseñar grilla de este monitor…**
+- Clic en cualquier zona → **▦ Grilla → ▦ Diseñar grilla de este monitor…**
 
 En el diseñador **nada cambia en las pantallas hasta que pulsas Aplicar**. El lienzo muestra cómo quedará el monitor: en verde las zonas que conservan lo que tienen abierto y, a la derecha, lo que se cerraría.
 
@@ -149,7 +161,7 @@ Para Word y PowerPoint, el equipo necesita tener Microsoft Office instalado. Por
 
 Puedes elegir **varios archivos** y repartirlos en un monitor de una sola vez:
 
-- Clic en una zona → **➕ Agregar → Varios archivos (repartir en el monitor)…**, o elige varios en **Archivo o URL… → Examinar**.
+- Clic en una zona → **＋ Agregar archivo o URL… → Examinar** y elige varios archivos.
 - **Arrastra** varios archivos desde el Explorador de Windows sobre un monitor del panel (si arrastras uno solo sobre una zona, se abre directamente ahí).
 - En la **Galería**, elige varios y pulsa **Organizar en un monitor…** (ver punto 12).
 
@@ -169,17 +181,19 @@ Una zona con una **página web** puede tener hasta **6 pestañas**. Todas ocupan
 2. Pulsa **＋ Nueva pestaña**, escribe una dirección (por ejemplo `www.igp.gob.pe`) o elige un enlace web de la lista, y pulsa **Abrir**. Se abre en la misma zona y queda al frente.
 3. Clic en una pestaña de la barra para verla; **✕** la cierra. La barra se oculta sola al quitar el ratón.
 
-Desde el panel, lo mismo está en clic en la zona → **▤ Pestañas**. La zona muestra cuántas pestañas tiene (*«· 3 pestañas»*). Las pestañas solo admiten páginas web: imágenes, videos y documentos se muestran siempre uno por zona. Elegir otro enlace en **☰ Abrir enlace** reemplaza la zona completa, con todas sus pestañas. Los perfiles y la sesión guardan las pestañas de cada zona.
+Arriba de la barra están **◀ Atrás**, **▶ Adelante** y **⟳ Recargar**, para moverte por la página como en un navegador normal. También están en el panel de la zona y se les puede asignar un atajo de teclado (punto 13).
+
+Desde el panel, las pestañas están en clic en la zona → **▤ Pestañas**. La zona muestra cuántas pestañas tiene (*«· 3 pestañas»*). Las pestañas solo admiten páginas web: imágenes, videos y documentos se muestran siempre uno por zona. Elegir otra cosa en el panel de la zona reemplaza la zona completa, con todas sus pestañas. Los perfiles y la sesión guardan las pestañas de cada zona.
 
 ## 5. Adjuntar una ventana de otra aplicación
 
 Puedes poner en una zona cualquier programa que ya tengas abierto (Excel, un visor, otra aplicación de monitoreo, etc.):
 
 1. Abre primero el programa que quieres mostrar.
-2. En el panel, haz clic en la zona y elige **➕ Agregar → ▣ Adjuntar ventana abierta**.
+2. En el panel, haz clic en la zona y pulsa **▣ Adjuntar ventana…** (abajo en el panel de la zona).
 3. Elige la ventana de la lista. Se coloca sin bordes y se adapta al tamaño de la zona.
 
-Para quitarla, haz clic en la zona y elige **↩ Soltar ventana**: vuelve al escritorio con su tamaño y posición originales. Al salir de IGP_Soft también se devuelven todas; **nunca se cierran**.
+Para quitarla, haz clic en la zona y pulsa **✕ Soltar ventana**: vuelve al escritorio con su tamaño y posición originales. Al salir de IGP_Soft también se devuelven todas; **nunca se cierran**.
 
 Si guardas un perfil con ventanas adjuntas, al abrirlo se vuelven a adjuntar, siempre que esos programas ya estén abiertos.
 
@@ -268,7 +282,24 @@ Un **perfil** recuerda cómo dejaste todo: qué monitores se usan, en cuántas z
 **Abrir un perfil**
 
 - En **★ Perfiles**, haz **doble clic** en el perfil (o elígelo y pulsa **▶ Abrir este perfil**). Te lleva a **Pantallas** con todo abierto.
-- También desde el icono de la bandeja: clic derecho → **Abrir perfil**.
+- También desde el icono de la bandeja: clic derecho → **Abrir perfil** (los perfiles en carpetas aparecen en un submenú con el nombre de la carpeta).
+
+**Ver qué tiene un perfil sin abrirlo**
+
+Pulsa la flecha **▾** a la derecha del perfil: la tarjeta se despliega y muestra la **captura de cada monitor** tal como se veía proyectado cuando guardaste el perfil (o cuando pulsaste **⟳ Reemplazar con lo actual**). La captura se toma sola al guardar. Los perfiles guardados antes de esta versión, y la **Última sesión**, no tienen captura: en su lugar se dibuja un esquema de cada monitor con su grilla y lo que se abriría en cada zona; para tener la captura, abre el perfil y pulsa **⟳ Reemplazar con lo actual**. **▴** la vuelve a cerrar. Con el teclado: **→** o **Espacio** la despliegan y **←** la cierra.
+
+**Ordenar perfiles en carpetas**
+
+A la izquierda está el panel **Carpetas**, como en la Galería:
+
+| Acción | Cómo |
+|--------|------|
+| Crear una carpeta | **＋ Nueva carpeta** (o clic derecho en el panel). Si guardas un perfil nuevo mientras miras una carpeta, se guarda en esa carpeta. |
+| Ver una carpeta | Clic en ella. **Todos** muestra todos los perfiles (y **Última sesión**); **Sin carpeta**, los que no están en ninguna. |
+| Mover un perfil | **Arrástralo** a una carpeta, o elígelo y pulsa **▤ Mover a carpeta** (también con clic derecho en el perfil). |
+| Renombrar o eliminar una carpeta | Clic derecho en la carpeta. Eliminarla **no borra** sus perfiles: pasan a **Sin carpeta**. |
+
+Reemplazar un perfil con lo actual lo deja en su carpeta. **Última sesión** no va en carpetas.
 
 **Última sesión**
 
@@ -376,7 +407,7 @@ Cuando un monitor está dividido, puedes **ampliar una zona** para que ocupe **t
 | `Ctrl + Alt + RePág` | Amplía la zona anterior. |
 | `Ctrl + Alt + P` | Muestra u oculta el panel (también cuando está oculto en la bandeja). |
 
-**Con el mouse:** clic en la zona (en el panel) → **⤢ Ampliar a todo el monitor**. Para volver: clic → **⤡ Volver a la grilla**.
+**Con el mouse:** clic en la zona (en el panel) → **⤢ Ampliar**. Para volver: clic → **⤡ Volver a la grilla**.
 
 En el panel, la zona ampliada se marca con la etiqueta amarilla **«Ampliada al monitor»** y las demás aparecen como **«detrás»**.
 
@@ -386,7 +417,7 @@ En el panel, la zona ampliada se marca con la etiqueta amarilla **«Ampliada al 
 2. Pulsa la nueva combinación. Debe incluir **Ctrl** o **Alt**.
 3. Se guarda al instante. Con **Retroceso** lo dejas *Sin asignar*; con **Esc** cancelas.
 
-También puedes asignar atajos a **Abrir en orden**, **Cerrar todas las ventanas**, **Cerrar todo en el monitor bajo el mouse**, **Bloquear o desbloquear el monitor bajo el mouse** y **Bloquear o desbloquear todos los monitores** (vienen sin asignar). Si la combinación ya la usa otra acción, el programa pregunta si quieres pasársela; si la usa otro programa de Windows, aparece en rojo como **Ocupado**. **↺ Restaurar atajos predeterminados** vuelve a los de la tabla.
+También puedes asignar atajos a **Abrir en orden**, **Cerrar todas las ventanas**, **Cerrar todo en el monitor bajo el mouse**, **Bloquear o desbloquear el monitor bajo el mouse**, **Bloquear o desbloquear todos los monitores** y, para la página web bajo el mouse, **atrás**, **adelante** y **recargar** (vienen sin asignar). Si la combinación ya la usa otra acción, el programa pregunta si quieres pasársela; si la usa otro programa de Windows, aparece en rojo como **Ocupado**. **↺ Restaurar atajos predeterminados** vuelve a los de la tabla.
 
 > En teclados en español, `Ctrl + Alt` funciona como `AltGr`. Evita combinaciones con letras o números que escriben símbolos (por ejemplo `AltGr + Q` escribe **@**), porque dejarían de escribirse.
 
@@ -485,6 +516,7 @@ Para pasar tus datos de una forma a la otra, usa **⇪ Exportar y copias → Cop
 | `IGP_Soft.perfiles.json` | Los perfiles guardados |
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
 | `IGP_Soft.galeria.json` | Las carpetas de la galería |
+| `IGP_Soft.perfiles.capturas\` | Las capturas de los monitores que muestra la vista previa de cada perfil |
 | `Assets\` | Imágenes, videos y documentos que agregaste |
 | `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |
 | `Copias de seguridad\` | Copias automáticas hechas antes de restaurar o actualizar |

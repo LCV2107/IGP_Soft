@@ -20,6 +20,9 @@ internal static class Hotkeys
         new(8, "cerrarmonitor", "Cerrar todo en el monitor bajo el mouse", Keys.None),
         new(9, "bloquear", "Bloquear o desbloquear el monitor bajo el mouse", Keys.None),
         new(10, "bloqueartodos", "Bloquear o desbloquear todos los monitores", Keys.None),
+        new(11, "webatras", "Página web bajo el mouse: atrás", Keys.None),
+        new(12, "webadelante", "Página web bajo el mouse: adelante", Keys.None),
+        new(13, "webrecargar", "Página web bajo el mouse: recargar", Keys.None),
     };
 
     public static HashSet<string> Failed { get; } = new();

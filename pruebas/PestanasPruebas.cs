@@ -14,6 +14,18 @@ public sealed class PestanasPruebas
         Assert.Equal(web, PestanasWeb.EsWeb(url));
 
     [Theory]
+    [InlineData("atras", true, 1)]
+    [InlineData("adelante", true, 2)]
+    [InlineData("recargar", true, 3)]
+    [InlineData("borrar", false, 0)]
+    [InlineData(null, false, 0)]
+    public void Atras_adelante_y_recargar_son_las_unicas_acciones(string? accion, bool valida, int comando)
+    {
+        Assert.Equal(valida, PestanasWeb.EsAccion(accion));
+        if (valida) Assert.Equal(comando, PestanasWeb.ComandoDe(accion!));
+    }
+
+    [Theory]
     [InlineData("www.igp.gob.pe", "https://www.igp.gob.pe", "www.igp.gob.pe")]
     [InlineData("  https://sigrid.igp.gob.pe/mapa  ", "https://sigrid.igp.gob.pe/mapa", "sigrid.igp.gob.pe")]
     [InlineData("", null, null)]

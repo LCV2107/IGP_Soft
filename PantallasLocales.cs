@@ -1170,6 +1170,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             surface.PestanaActivada += (zona, i) => EnZona(device, zona, (t, s) => ActivarPestana(t, s, i));
             surface.PestanaCerrada += (zona, i) => EnZona(device, zona, (t, s) => CerrarPestanaEn(t, s, i));
             surface.PestanaNueva += zona => PedirPestana(device, zona, creada);
+            surface.Navegacion += (zona, accion) => EnZona(device, zona, (_, s) => Navegar(s, accion));
             _surfaces[tile.Device] = surface;
             surface.Show();
         }
@@ -1716,6 +1717,21 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         return Ok();
     }
 
+    public Task<Resultado> NavegarWeb(string monitor, int zona, string accion)
+    {
+        if (!PestanasWeb.EsAccion(accion)) return Task.FromResult(Resultado.Falla("accion_no_valida"));
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        return Task.FromResult(Navegar(seg, accion) ? Resultado.Bien : Resultado.Falla("no_es_web"));
+    }
+
+    public static bool Navegar(Segment seg, string accion)
+    {
+        if (seg.Launched is not { } win || !PestanasWeb.EsWeb(seg.Link?.Url) || !NativeMethods.IsWindow(win.Hwnd)) return false;
+        NativeMethods.PostMessage(win.Hwnd, NativeMethods.WM_APPCOMMAND, win.Hwnd, (IntPtr)(PestanasWeb.ComandoDe(accion) << 16));
+        return true;
+    }
+
     public Task<Resultado> Ampliar(string monitor, int zona)
     {
         if (FindMonitor(monitor) is not { } t) return NoMonitor();
@@ -1838,6 +1854,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         public event Action<int, int>? PestanaActivada;
         public event Action<int, int>? PestanaCerrada;
         public event Action<int>? PestanaNueva;
+        public event Action<int, string>? Navegacion;
 
         public void SetBarras(List<(int Zona, Rectangle Area, IReadOnlyList<PestanaVista> Pestanas, int Activa)> barras)
         {
@@ -1854,6 +1871,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                     barra.Activar += (x, i) => PestanaActivada?.Invoke(x.Zona, i);
                     barra.Cerrar += (x, i) => PestanaCerrada?.Invoke(x.Zona, i);
                     barra.Nueva += x => PestanaNueva?.Invoke(x.Zona);
+                    barra.Navegar += (x, accion) => Navegacion?.Invoke(x.Zona, accion);
                     Controls.Add(barra);
                     _barras[b.Zona] = barra;
                 }

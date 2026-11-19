@@ -101,6 +101,14 @@ internal sealed class GridLayout
         return result;
     }
 
+    public static GridLayout Inicial => Uniform(1, 1);
+
+    public static int SeCerrarian(GridLayout from, IEnumerable<int> occupied, GridLayout to)
+    {
+        List<int> ocupadas = occupied.Distinct().Where(i => i >= 0 && i < from.Zones.Count).ToList();
+        return ocupadas.Count - Carry(from, ocupadas, to).Count;
+    }
+
     public static IReadOnlyList<(int Cols, int Rows)> Divisiones { get; } = new[]
     {
         (1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (3, 2), (2, 3), (3, 3), (4, 2), (4, 3), (4, 4),
