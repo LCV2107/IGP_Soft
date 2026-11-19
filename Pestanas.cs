@@ -10,6 +10,14 @@ internal static class PestanasWeb
 
     public static bool EsAccion(string? accion) => accion is Atras or Adelante or Recargar;
 
+    public static string? AccionDeTecla(Keys tecla, bool alt, bool ctrl, bool mayus) =>
+        !alt || ctrl || mayus ? null : tecla switch
+        {
+            Keys.Left => Atras,
+            Keys.Right => Adelante,
+            _ => null,
+        };
+
     public static int ComandoDe(string accion) => accion switch
     {
         Atras => 1,
@@ -31,6 +39,68 @@ internal static class PestanasWeb
 }
 
 internal sealed record PestanaVista(string Titulo, bool Cargando);
+
+internal static class TecladoWeb
+{
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
+
+    private delegate IntPtr Proc(int code, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, Proc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    private static IntPtr _gancho;
+    private static Proc? _proc;
+    private static Func<string, bool>? _navegar;
+
+    private static bool Pulsada(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+    public static void Iniciar(Func<string, bool> navegar)
+    {
+        _navegar = navegar;
+        if (_gancho != IntPtr.Zero) return;
+        _proc = Recibir;
+        _gancho = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
+    }
+
+    public static void Detener()
+    {
+        _navegar = null;
+        if (_gancho == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_gancho);
+        _gancho = IntPtr.Zero;
+        _proc = null;
+    }
+
+    private static IntPtr Recibir(int code, IntPtr wParam, IntPtr lParam)
+    {
+        if (code >= 0 && (wParam == WM_SYSKEYDOWN || wParam == WM_KEYDOWN) && _navegar is { } navegar)
+        {
+            var tecla = (Keys)System.Runtime.InteropServices.Marshal.ReadInt32(lParam);
+            string? accion = PestanasWeb.AccionDeTecla(tecla, Pulsada(0x12), Pulsada(0x11), Pulsada(0x10));
+            try
+            {
+                if (accion is not null && navegar(accion)) return (IntPtr)1;
+            }
+            catch { }
+        }
+        return CallNextHookEx(_gancho, code, wParam, lParam);
+    }
+}
 
 internal sealed class BarraPestanas : Control
 {

@@ -114,13 +114,13 @@ internal sealed class GalleryPage : Page
         _carpetas.MouseUp += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
-            int i = _carpetas.IndexFromPoint(e.Location);
+            int i = _carpetas.Indice(e.Location);
             if (i >= 0) _carpetas.SelectedIndex = i;
             ShowFolderMenu(e.Location);
         };
         _carpetas.DragOver += (_, e) =>
         {
-            int i = _carpetas.IndexFromPoint(_carpetas.PointToClient(new Point(e.X, e.Y)));
+            int i = _carpetas.Indice(_carpetas.PointToClient(new Point(e.X, e.Y)));
             bool ok = e.Data?.GetDataPresent(FormatoArrastre) == true && i >= 0 && _carpetas.Items[i] is CarpetaItem c && (c.Propia || c.Clave == CarpetaItem.SinCarpeta);
             e.Effect = ok ? DragDropEffects.Move : DragDropEffects.None;
             int nuevo = ok ? i : -1;

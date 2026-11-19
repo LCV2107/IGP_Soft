@@ -122,13 +122,29 @@ Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. Tamb
 
 ## 4. Mostrar una imagen, un video, un documento u otra página
 
-En el menú de cualquier zona, elige **➕ Agregar → Archivo o URL…**:
+En el panel de cualquier zona, pulsa **＋ Agregar archivo o URL…**:
 
 1. Elige un archivo de tu PC (imagen, video, PDF, Word o PowerPoint), o pega una dirección web.
 2. Si quieres tenerlo siempre disponible, deja activado *Agregar también a la lista de enlaces*.
 3. Acepta: se muestra en esa zona.
 
 Los archivos de tu PC se **copian a la carpeta `Assets`**, junto al programa. Así siguen funcionando aunque muevas o borres el archivo original, o lleves el programa a otra PC.
+
+### Zoom en imágenes
+
+Una imagen se puede **acercar** y **mover** dentro de su zona:
+
+| En la pantalla | Qué hace |
+|----------------|----------|
+| **Rueda del mouse** | Acerca o aleja poco a poco, hacia el punto donde está el mouse (de 100 % a 1000 %). |
+| **Arrastrar** | Mueve la imagen para ver otra parte. |
+| **Doble clic** | Vuelve a encajar la imagen completa. |
+| **Barra al pasar el mouse** | Abajo a la derecha: **−**, el porcentaje, **+** y **Encajar**. Se oculta sola. |
+| **Teclado** (después de un clic en la imagen) | `+` y `−` acercan y alejan, `0` encaja, las flechas mueven. |
+
+Desde el panel (también manejando otro equipo con IGPDesk): clic en la zona → **🔍 Zoom**: **−**, **+**, **Encajar** y flechas para mover la vista.
+
+El zoom y la posición **se guardan** con la zona: en la **Última sesión**, en los **perfiles** y al cambiar la grilla. Al volver a abrir el perfil, la imagen aparece igual que la dejaste. En las imágenes `.webp`, `.avif` y `.svg`, los botones del panel vuelven a cargar la imagen con la vista nueva, por eso se nota un parpadeo breve.
 
 ### Videos
 
@@ -181,7 +197,7 @@ Una zona con una **página web** puede tener hasta **6 pestañas**. Todas ocupan
 2. Pulsa **＋ Nueva pestaña**, escribe una dirección (por ejemplo `www.igp.gob.pe`) o elige un enlace web de la lista, y pulsa **Abrir**. Se abre en la misma zona y queda al frente.
 3. Clic en una pestaña de la barra para verla; **✕** la cierra. La barra se oculta sola al quitar el ratón.
 
-Arriba de la barra están **◀ Atrás**, **▶ Adelante** y **⟳ Recargar**, para moverte por la página como en un navegador normal. También están en el panel de la zona y se les puede asignar un atajo de teclado (punto 13).
+Arriba de la barra están **◀ Atrás**, **▶ Adelante** y **⟳ Recargar**, para moverte por la página como en un navegador normal. Después de hacer clic en la página, también funcionan **`Alt + ←`** (atrás) y **`Alt + →`** (adelante) en la zona que está bajo el mouse. Los mismos botones están en el panel de la zona y se les puede asignar un atajo de teclado propio (punto 13).
 
 Desde el panel, las pestañas están en clic en la zona → **▤ Pestañas**. La zona muestra cuántas pestañas tiene (*«· 3 pestañas»*). Las pestañas solo admiten páginas web: imágenes, videos y documentos se muestran siempre uno por zona. Elegir otra cosa en el panel de la zona reemplaza la zona completa, con todas sus pestañas. Los perfiles y la sesión guardan las pestañas de cada zona.
 

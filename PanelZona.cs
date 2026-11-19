@@ -357,6 +357,62 @@ internal sealed class PanelZonaForm : Form
     }
 }
 
+internal sealed class ControlZoom : Control
+{
+    private readonly Func<VistaImagen?> _vista;
+    private readonly Action<string> _accion;
+    private readonly System.Windows.Forms.Timer _refresco = new() { Interval = 300 };
+    private readonly Label _pct = new() { AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Font = Theme.Section, ForeColor = Theme.Text };
+
+    public ControlZoom(Func<VistaImagen?> vista, Action<string> accion)
+    {
+        _vista = vista;
+        _accion = accion;
+        BackColor = Theme.Surface;
+        Size = new Size(292, 176);
+        ModernButton B(string texto, string accion, int x, int y, int w, string? ayuda = null)
+        {
+            var b = new ModernButton(texto, ButtonKind.Secondary) { Location = new Point(x, y), Size = new Size(w, 36) };
+            b.Click += (_, _) => _accion(accion);
+            Controls.Add(b);
+            return b;
+        }
+        Controls.Add(new Label { Text = "Zoom de la imagen", Font = Theme.BodyBold, ForeColor = Theme.Text, Location = new Point(12, 10), AutoSize = true });
+        B("−", "alejar", 12, 36, 44);
+        _pct.Location = new Point(60, 36);
+        _pct.Size = new Size(72, 36);
+        Controls.Add(_pct);
+        B("+", "acercar", 136, 36, 44);
+        B("Encajar", "encajar", 188, 36, 92);
+        Controls.Add(new Label { Text = "Mover la vista", Font = Theme.Small, ForeColor = Theme.TextMuted, Location = new Point(12, 84), AutoSize = true });
+        B("↑", "arriba", 124, 82, 44);
+        B("←", "izquierda", 76, 122, 44);
+        B("↓", "abajo", 124, 122, 44);
+        B("→", "derecha", 172, 122, 44);
+        _refresco.Tick += (_, _) => Refrescar();
+        _refresco.Start();
+        Refrescar();
+    }
+
+    private void Refrescar() => _pct.Text = $"{(_vista() ?? VistaImagen.Encajada).Porcentaje} %";
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _refresco.Dispose();
+        base.Dispose(disposing);
+    }
+
+    public static void Mostrar(Control junto, Func<VistaImagen?> vista, Action<string> accion)
+    {
+        var control = new ControlZoom(vista, accion);
+        var host = new ToolStripControlHost(control) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = control.Size };
+        var drop = new ToolStripDropDown { Padding = new Padding(1) };
+        drop.Items.Add(host);
+        drop.Closed += (_, _) => junto.BeginInvoke(drop.Dispose);
+        drop.Show(junto, new Point(0, junto.Height));
+    }
+}
+
 internal sealed record TarjetaEnlace(LinkDef Enlace, TipoEnlace Tipo, string? Donde)
 {
     public bool Aqui => Donde == "";

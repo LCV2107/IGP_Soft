@@ -389,6 +389,9 @@ internal static class Profiles
 
 internal sealed class LaunchedWindow
 {
+    public VistaImagen? VistaPagina { get; set; }
+    public bool PaginaImagen { get; set; }
+
     public required int ProcessId { get; init; }
     public required IntPtr Hwnd { get; init; }
     public required string ProfileDir { get; init; }
@@ -475,7 +478,41 @@ internal static class MediaWrapper
 
     public static bool EsVideo(string target) => VidExt.Contains(ExtensionOf(target).ToLowerInvariant());
 
-    public static string? Prepare(string target, string dir)
+    public static bool EsImagen(string target) => ImgExt.Contains(ExtensionOf(target).ToLowerInvariant());
+
+    public static string ImagenHtml(string src, VistaImagen? vista) => """
+        <!doctype html><html><head><meta charset="utf-8"><title>IGP_Soft</title><style>
+        html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}
+        img{position:absolute;left:0;top:0;user-select:none;-webkit-user-drag:none}
+        #b{position:fixed;right:12px;bottom:12px;display:flex;align-items:center;background:rgba(15,23,42,.85);border-radius:10px;opacity:0;transition:opacity .2s;font:600 14px "Segoe UI",sans-serif}
+        #b.v{opacity:1}
+        #b button{background:none;border:0;color:#fff;font:inherit;padding:8px 12px;cursor:pointer;border-radius:8px}
+        #b button:hover{background:#2563eb}
+        #b span{color:#fff;padding:8px 6px;min-width:52px;text-align:center;font-weight:400}
+        </style></head><body><img id="i" src="@@SRC@@" alt=""><div id="b"><button data-a="alejar">−</button><span id="p">100 %</span><button data-a="acercar">+</button><button data-a="encajar">Encajar</button></div>
+        <script>
+        var v=@@VISTA@@,img=document.getElementById('i'),bar=document.getElementById('b'),pct=document.getElementById('p'),drag=null,hide=0;
+        function dims(){return{iw:img.naturalWidth||1,ih:img.naturalHeight||1,W:innerWidth,H:innerHeight}}
+        function scale(d,z){return Math.min(d.W/d.iw,d.H/d.ih)*z}
+        function fix(){var d=dims();v.z=Math.min(10,Math.max(1,v.z));var s=scale(d,v.z);function ax(c,l,vis){var m=l*s;if(m<=vis+.5)return .5;var h=vis/(2*m);return Math.min(1-h,Math.max(h,c))}v.x=ax(v.x,d.iw,d.W);v.y=ax(v.y,d.ih,d.H)}
+        function rect(){var d=dims(),s=scale(d,v.z),w=d.iw*s,h=d.ih*s;return{l:d.W/2-v.x*w,t:d.H/2-v.y*h,w:w,h:h}}
+        function draw(){fix();var r=rect();img.style.width=r.w+'px';img.style.height=r.h+'px';img.style.left=r.l+'px';img.style.top=r.t+'px';pct.textContent=Math.round(v.z*100)+' %';img.style.cursor=v.z>1.001?'move':'default';document.title='IGP_Soft · vista '+v.z.toFixed(4)+' '+v.x.toFixed(4)+' '+v.y.toFixed(4)}
+        function zoomAt(f,px,py){var r=rect(),ux=(px-r.l)/r.w,uy=(py-r.t)/r.h,d=dims();v.z=Math.min(10,Math.max(1,v.z*f));var s=scale(d,v.z),w=d.iw*s,h=d.ih*s;v.x=(d.W/2-(px-ux*w))/w;v.y=(d.H/2-(py-uy*h))/h;draw()}
+        function move(dx,dy){var r=rect();v.x-=dx/r.w;v.y-=dy/r.h;draw()}
+        function act(a){var W=innerWidth,H=innerHeight;if(a=='acercar')zoomAt(1.25,W/2,H/2);else if(a=='alejar')zoomAt(1/1.25,W/2,H/2);else if(a=='encajar'){v={z:1,x:.5,y:.5};draw()}else if(a=='izquierda')move(W*.2,0);else if(a=='derecha')move(-W*.2,0);else if(a=='arriba')move(0,H*.2);else if(a=='abajo')move(0,-H*.2)}
+        function show(){bar.className='v';clearTimeout(hide);hide=setTimeout(function(){if(!bar.matches(':hover'))bar.className=''},1800)}
+        addEventListener('wheel',function(e){e.preventDefault();show();zoomAt(Math.pow(1.1,-Math.max(-1,Math.min(1,e.deltaY/100))),e.clientX,e.clientY)},{passive:false});
+        addEventListener('mousemove',function(e){show();if(drag){move(e.clientX-drag.x,e.clientY-drag.y);drag={x:e.clientX,y:e.clientY}}});
+        img.addEventListener('mousedown',function(e){if(e.button==0){drag={x:e.clientX,y:e.clientY};e.preventDefault()}});
+        addEventListener('mouseup',function(){drag=null});
+        img.addEventListener('dblclick',function(){act('encajar')});
+        bar.addEventListener('click',function(e){var a=e.target.getAttribute&&e.target.getAttribute('data-a');if(a)act(a)});
+        addEventListener('keydown',function(e){if(e.altKey||e.ctrlKey)return;var m={'+':'acercar','-':'alejar','0':'encajar',ArrowLeft:'izquierda',ArrowRight:'derecha',ArrowUp:'arriba',ArrowDown:'abajo'}[e.key];if(m){act(m);e.preventDefault()}});
+        addEventListener('resize',draw);img.addEventListener('load',draw);if(img.complete)draw();
+        </script></body></html>
+        """.Replace("@@SRC@@", src).Replace("@@VISTA@@", Encuadre.Js(vista));
+
+    public static string? Prepare(string target, string dir, VistaImagen? vista = null)
     {
         string ext = ExtensionOf(target).ToLowerInvariant();
         bool img = ImgExt.Contains(ext);
@@ -483,12 +520,7 @@ internal static class MediaWrapper
         if (!img && !vid) return null;
 
         string src = System.Net.WebUtility.HtmlEncode(ToBrowserUrl(target));
-        string html = img
-            ? "<!doctype html><html><head><meta charset=\"utf-8\"><title>IGP_Soft</title><style>" +
-              "html,body{margin:0;width:100%;height:100%;background:#fff;overflow:hidden}" +
-              "img{position:fixed;inset:0;width:100%;height:100%;object-fit:contain}" +
-              $"</style></head><body><img src=\"{src}\" alt=\"\"></body></html>"
-            : VideoHtml(src);
+        string html = img ? ImagenHtml(src, vista) : VideoHtml(src);
 
         string path = Path.Combine(dir, $"view_{Guid.NewGuid():N}.html");
         File.WriteAllText(path, html, new UTF8Encoding(false));
@@ -593,7 +625,7 @@ internal static class WindowManager
     private static string ToBrowserUrl(string s) => MediaWrapper.ToBrowserUrl(s);
 
     public static LaunchedWindow? LaunchAndPlace(Browser browser, string url, Rectangle area, string tag,
-        IntPtr parentHwnd = default, bool keepData = false)
+        IntPtr parentHwnd = default, bool keepData = false, VistaImagen? vista = null)
     {
         lock (LaunchGate)
         {
@@ -603,7 +635,7 @@ internal static class WindowManager
             bool sinGpu = !Profiles.HardwareAcceleration;
             if (browser.Family == BrowserFamily.Chromium && !running) Profiles.FijarAceleracion(profileDir, !sinGpu);
             bool? aceleracionPerfil = browser.Family == BrowserFamily.Chromium ? Profiles.AceleracionDelPerfil(Profiles.LeerLocalState(profileDir)) : null;
-            url = MediaWrapper.Prepare(url, profileDir) ?? ToBrowserUrl(url);
+            url = MediaWrapper.Prepare(url, profileDir, vista) ?? ToBrowserUrl(url);
             var before = SnapshotWindows(browser.ProcessName);
 
             Rectangle onScreen = area;
@@ -1591,6 +1623,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);

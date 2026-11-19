@@ -65,7 +65,7 @@ internal sealed class ProfilesPage : Page
         _list.DoubleClick += (_, _) =>
         {
             Point p = _list.PointToClient(Cursor.Position);
-            int i = _list.IndexFromPoint(p);
+            int i = _list.Indice(p);
             if (i >= 0 && !Flecha(_list.GetItemRectangle(i)).Contains(p)) OpenSelected();
         };
         _list.MouseDown += ListMouseDown;
@@ -110,13 +110,13 @@ internal sealed class ProfilesPage : Page
         _carpetas.MouseUp += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
-            int i = _carpetas.IndexFromPoint(e.Location);
+            int i = _carpetas.Indice(e.Location);
             if (i >= 0) _carpetas.SelectedIndex = i;
             ShowFolderMenu(e.Location);
         };
         _carpetas.DragOver += (_, e) =>
         {
-            int i = _carpetas.IndexFromPoint(_carpetas.PointToClient(new Point(e.X, e.Y)));
+            int i = _carpetas.Indice(_carpetas.PointToClient(new Point(e.X, e.Y)));
             bool ok = e.Data?.GetDataPresent(FormatoArrastre) == true && i >= 0 && _carpetas.Items[i] is CarpetaItem c && c.Clave != CarpetaItem.Todos;
             e.Effect = ok ? DragDropEffects.Move : DragDropEffects.None;
             int nuevo = ok ? i : -1;
@@ -258,7 +258,7 @@ internal sealed class ProfilesPage : Page
 
     private void ListMouseDown(object? sender, MouseEventArgs e)
     {
-        int i = _list.IndexFromPoint(e.Location);
+        int i = _list.Indice(e.Location);
         _arrastreIndice = -1;
         if (i < 0 || e.Button != MouseButtons.Left || _list.Items[i] is not LayoutProfile p) return;
         if (Flecha(_list.GetItemRectangle(i)).Contains(e.Location))
@@ -276,7 +276,7 @@ internal sealed class ProfilesPage : Page
 
     private void ListMouseMove(object? sender, MouseEventArgs e)
     {
-        int i = _list.IndexFromPoint(e.Location);
+        int i = _list.Indice(e.Location);
         int encima = i >= 0 && Flecha(_list.GetItemRectangle(i)).Contains(e.Location) ? i : -1;
         if (encima != _flechaEncima)
         {

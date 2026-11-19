@@ -12,6 +12,7 @@ internal sealed class Segment
     public object? Pending;
     public readonly List<Pestana> Pestanas = new();
     public int Activa;
+    public VistaImagen? VistaPedida;
     public bool Disabled => Spec.Off;
     public bool Busy => Link is not null || Launched is not null || Pending is not null;
 }
@@ -102,8 +103,10 @@ internal static class EstadosZona
 }
 
 internal sealed record EstadoZona(int Zona, string Estado, string? Titulo, string? Url, bool Adjunta, int X, int Y, int Ancho, int Alto,
-    IReadOnlyList<LinkDef>? Pestanas = null, int Activa = 0)
+    IReadOnlyList<LinkDef>? Pestanas = null, int Activa = 0, VistaImagen? Vista = null)
 {
+    [JsonIgnore] public bool Imagen => Url is not null && TiposEnlace.De(Url) == TipoEnlace.Imagen;
+
     [JsonIgnore] public bool Web => PestanasWeb.EsWeb(Url) && Estado is EstadosZona.EnPantalla or EstadosZona.Borrador;
     [JsonIgnore] public int CantidadPestanas => Pestanas?.Count ?? (Url is null ? 0 : 1);
 
@@ -142,7 +145,7 @@ internal sealed record EstadoPantallas(
         p.Maximized?.Index,
         p.Segments.Select(s => new EstadoZona(s.Index, EstadoDe(p, s), s.Link?.Titulo, s.Link?.Url, s.Launched is { Attached: true, AlCerrar: null },
             s.Area.X, s.Area.Y, s.Area.Width, s.Area.Height,
-            s.Pestanas.Count > 0 ? s.Pestanas.Select(t => t.Link).ToList() : null, s.Activa)).ToList(), p.Bloqueado,
+            s.Pestanas.Count > 0 ? s.Pestanas.Select(t => t.Link).ToList() : null, s.Activa, VistaImagen.ParaGuardar(Vistas.De(s)))).ToList(), p.Bloqueado,
         p.Monitor.Members is { Count: > 1 } miembros
             ? miembros.Select(m => new AreaMiembro(m.X - p.Monitor.X, m.Y - p.Monitor.Y, m.Width, m.Height)).ToList()
             : null);
@@ -186,7 +189,7 @@ internal sealed record EstadoPantallas(
             Rows = m.Filas,
             Layout = m.Layout().IsUniform ? null : m.Grilla.ToList(),
             Links = m.Zonas.Where(z => z.Url is not null)
-                           .Select(z => new ZoneLayout { Zone = z.Zona, Titulo = z.Titulo ?? "", Url = z.Url!, Pestanas = z.Pestanas?.ToList(), Activa = z.Activa })
+                           .Select(z => new ZoneLayout { Zone = z.Zona, Titulo = z.Titulo ?? "", Url = z.Url!, Pestanas = z.Pestanas?.ToList(), Activa = z.Activa, Vista = z.Vista })
                            .ToList(),
         }).ToList(),
     };
@@ -243,6 +246,7 @@ internal interface IPantallas
     Task<Resultado> ActivarPestana(string monitor, int zona, int indice);
     Task<Resultado> CerrarPestana(string monitor, int zona, int indice);
     Task<Resultado> NavegarWeb(string monitor, int zona, string accion);
+    Task<Resultado> VistaImagen(string monitor, int zona, string accion);
     Task<Resultado> Ampliar(string monitor, int zona);
     Task<Resultado> Restaurar(string? monitor);
     Task<Resultado> AmpliarSiguiente(string monitor, int paso);

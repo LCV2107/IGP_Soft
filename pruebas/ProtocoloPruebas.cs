@@ -54,6 +54,7 @@ internal sealed class PantallasFalsas : IPantallas
     public Task<Resultado> ActivarPestana(string monitor, int zona, int indice) => Ok($"activar {monitor} {zona} {indice}");
     public Task<Resultado> CerrarPestana(string monitor, int zona, int indice) => Ok($"cerrar_pestana {monitor} {zona} {indice}");
     public Task<Resultado> NavegarWeb(string monitor, int zona, string accion) => Ok($"navegar {monitor} {zona} {accion}");
+    public Task<Resultado> VistaImagen(string monitor, int zona, string accion) => Ok($"vista {monitor} {zona} {accion}");
     public Task<Resultado> Ampliar(string monitor, int zona) => Ok($"ampliar {monitor} {zona}");
     public Task<Resultado> Restaurar(string? monitor) => Ok($"restaurar {monitor ?? "todos"}");
     public Task<Resultado> AmpliarSiguiente(string monitor, int paso) => Ok($"siguiente {monitor} {paso}");
@@ -147,6 +148,7 @@ public sealed class ProtocoloPruebas : IDisposable
         Assert.True((await c.ActivarPestana("MON-A-1", 0, 1)).Ok);
         Assert.True((await c.CerrarPestana("MON-A-1", 0, 1)).Ok);
         Assert.True((await c.NavegarWeb("MON-A-1", 0, PestanasWeb.Atras)).Ok);
+        Assert.True((await c.VistaImagen("MON-A-1", 0, "acercar")).Ok);
         Assert.Equal("enlace_no_permitido", (await c.AbrirPestana("MON-A-1", 0, new LinkDef("x", "ventana:cmd|x"))).Codigo);
         Assert.Single(await c.VentanasAbiertas());
         Assert.Equal(new byte[] { 1, 2, 3 }, await c.VistaPrevia("MON-A-1", 240));
@@ -161,6 +163,7 @@ public sealed class ProtocoloPruebas : IDisposable
         Assert.Contains("activar MON-A-1 0 1", _falsas.Llamadas);
         Assert.Contains("cerrar_pestana MON-A-1 0 1", _falsas.Llamadas);
         Assert.Contains("navegar MON-A-1 0 atras", _falsas.Llamadas);
+        Assert.Contains("vista MON-A-1 0 acercar", _falsas.Llamadas);
         Assert.DoesNotContain(_falsas.Llamadas, l => l.Contains("ventana:cmd"));
     }
 

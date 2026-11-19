@@ -11,6 +11,7 @@ internal sealed class ZoneLayout
     public string Url { get; set; } = "";
     public List<LinkDef>? Pestanas { get; set; }
     public int Activa { get; set; }
+    public VistaImagen? Vista { get; set; }
 }
 
 internal sealed class MonitorLayout

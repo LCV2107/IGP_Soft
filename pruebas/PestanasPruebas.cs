@@ -26,6 +26,43 @@ public sealed class PestanasPruebas
     }
 
     [Theory]
+    [InlineData(Keys.Left, true, false, false, "atras")]
+    [InlineData(Keys.Right, true, false, false, "adelante")]
+    [InlineData(Keys.Left, false, false, false, null)]
+    [InlineData(Keys.Left, true, true, false, null)]
+    [InlineData(Keys.Right, true, false, true, null)]
+    [InlineData(Keys.Up, true, false, false, null)]
+    public void Alt_con_flechas_navega_atras_y_adelante(Keys tecla, bool alt, bool ctrl, bool mayus, string? accion) =>
+        Assert.Equal(accion, PestanasWeb.AccionDeTecla(tecla, alt, ctrl, mayus));
+
+    [Fact]
+    public void Fuera_de_los_elementos_de_una_lista_no_hay_indice()
+    {
+        Exception? error = null;
+        var t = new Thread(() =>
+        {
+            try
+            {
+                using var f = new Form { Size = new Size(300, 400) };
+                var l = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, DrawMode = DrawMode.OwnerDrawVariable };
+                l.MeasureItem += (_, e) => e.ItemHeight = 40;
+                f.Controls.Add(l);
+                l.Items.Add("a");
+                l.Items.Add("b");
+                f.Show();
+                Assert.Equal(0, l.Indice(new Point(10, 10)));
+                Assert.Equal(1, l.Indice(new Point(10, 50)));
+                Assert.Equal(-1, l.Indice(new Point(10, 300)));
+            }
+            catch (Exception e) { error = e; }
+        });
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        t.Join();
+        Assert.Null(error);
+    }
+
+    [Theory]
     [InlineData("www.igp.gob.pe", "https://www.igp.gob.pe", "www.igp.gob.pe")]
     [InlineData("  https://sigrid.igp.gob.pe/mapa  ", "https://sigrid.igp.gob.pe/mapa", "sigrid.igp.gob.pe")]
     [InlineData("", null, null)]

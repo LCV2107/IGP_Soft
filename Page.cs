@@ -74,3 +74,12 @@ internal sealed class ListaSinSaltos : FlowLayoutPanel
     protected override Point ScrollToControl(Control activeControl) =>
         _mostrando || Tabulando ? base.ScrollToControl(activeControl) : DisplayRectangle.Location;
 }
+
+internal static class ListasUtil
+{
+    public static int Indice(this ListBox lista, Point p)
+    {
+        int i = lista.IndexFromPoint(p);
+        return i >= 0 && i < lista.Items.Count && lista.GetItemRectangle(i).Contains(p) ? i : -1;
+    }
+}

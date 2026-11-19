@@ -9,15 +9,13 @@ internal static class NativeImage
         return Thumbnails.CanLoadDirectly(path) && File.Exists(path);
     }
 
-    public static LaunchedWindow? Show(Control surface, string url, Rectangle area)
+    public static LaunchedWindow? Show(Control surface, string url, Rectangle area, VistaImagen? vista = null, Action? cambio = null)
     {
         Image? image = Thumbnails.LoadImage(AssetStore.Resolve(url));
         if (image is null) return null;
 
-        var box = new PictureBox
-        {
-            SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.White, Image = image, Bounds = area,
-        };
+        var box = new VisorImagen(image, vista) { Bounds = area };
+        if (cambio is not null) box.VistaCambiada += cambio;
         surface.Controls.Add(box);
         box.BringToFront();
         box.CreateControl();
@@ -32,10 +30,9 @@ internal static class NativeImage
     {
         window.Closed = true;
         if (window.Tag is VisorPdf pdf) { pdf.Dispose(); return; }
-        if (window.Tag is not PictureBox box) return;
-        Image? image = box.Image;
-        box.Image = null;
+        if (window.Tag is not VisorImagen box) return;
+        Image image = box.Imagen;
         box.Dispose();
-        image?.Dispose();
+        image.Dispose();
     }
 }

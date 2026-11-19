@@ -335,6 +335,9 @@ internal sealed class PantallasRemotas : IPantallas, IArchivosRemotos, IDisposab
     public Task<Resultado> CerrarPestana(string monitor, int zona, int indice) =>
         Simple("pestana_cerrar", Datos(("monitor", monitor), ("zona", zona), ("indice", indice)));
 
+    public Task<Resultado> VistaImagen(string monitor, int zona, string accion) =>
+        Simple("imagen_vista", Datos(("monitor", monitor), ("zona", zona), ("accion", accion)));
+
     public Task<Resultado> NavegarWeb(string monitor, int zona, string accion) =>
         Simple("web_navegar", Datos(("monitor", monitor), ("zona", zona), ("accion", accion)));
 

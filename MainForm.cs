@@ -1019,6 +1019,11 @@ internal sealed class MainForm : Form
                 lista.Add(m.Ampliada == zona.Zona
                     ? new AccionZona("⤡", "Volver a la grilla", _ => _p.Restaurar(m.Id), Ayuda: Ayuda("Vuelve a mostrar todas las zonas.", "restaurar"))
                     : new AccionZona("⤢", "Ampliar", _ => _p.Ampliar(m.Id, zona.Zona), zona.Ocupada, Ayuda("Muestra esta zona en todo el monitor.", "ampliar")));
+            if (zona.Imagen && zona.Estado == EstadosZona.EnPantalla)
+                lista.Add(new AccionZona("🔍", $"Zoom {(zona.Vista ?? VistaImagen.Encajada).Porcentaje} %", c => ControlZoom.Mostrar(c,
+                        () => _estado.Monitor(m.Id)?.Zonas.FirstOrDefault(z => z.Zona == zona.Zona)?.Vista,
+                        accion => _p.VistaImagen(m.Id, zona.Zona, accion)),
+                    Cierra: false, Ayuda: "Acercar, alejar, encajar o mover la imagen. También con la rueda del mouse y arrastrando sobre la imagen en la pantalla."));
             if (zona.Web)
             {
                 lista.Add(new AccionZona("◀", "Atrás", _ => _p.NavegarWeb(m.Id, zona.Zona, PestanasWeb.Atras), Cierra: false, Ayuda: Ayuda("Página anterior.", "webatras")));

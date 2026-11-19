@@ -67,6 +67,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             CheckClosedWindows();
             EnforceWindows();
             VigilarVideos();
+            RevisarVistas();
             foreach (DisplaySurface surface in _surfaces.Values)
                 if (!surface.IsDisposed) surface.BarrasAlFrente();
         };
@@ -80,11 +81,73 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         _maintenance.Start();
         WindowWatcher.Start(OnWindowMoved);
         AssetStore.Moved += OnAssetsMoved;
+        TecladoWeb.Iniciar(NavegarConTeclado);
+    }
+
+    private bool _vistaCambiada;
+
+    private void RevisarVistas()
+    {
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Segments)
+                if (s.Launched is { PaginaImagen: true, Closed: false } w &&
+                    Encuadre.LeerTitulo(WindowManager.Titulo(w.Hwnd)) is { } v && v != w.VistaPagina)
+                {
+                    w.VistaPagina = v;
+                    _vistaCambiada = true;
+                }
+        if (!_vistaCambiada) return;
+        _vistaCambiada = false;
+        Notify();
+        SaveLastSession();
+    }
+
+    public Task<Resultado> VistaImagen(string monitor, int zona, string accion)
+    {
+        if (!Encuadre.EsAccion(accion)) return Task.FromResult(Resultado.Falla("accion_no_valida"));
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        if (seg.Launched?.Tag is VisorImagen visor)
+        {
+            visor.Aplicar(accion);
+            return Ok();
+        }
+        if (seg.Launched is { PaginaImagen: true } w && seg.Link is { } link)
+        {
+            VistaImagen nueva = Encuadre.AplicarSinMedidas(w.VistaPagina ?? IGP_Soft.VistaImagen.Encajada, accion);
+            _ = OpenAsync(t, seg, link, quiet: true, vista: IGP_Soft.VistaImagen.ParaGuardar(nueva));
+            return Ok();
+        }
+        return Task.FromResult(Resultado.Falla("no_es_imagen"));
+    }
+
+    private void AplicarVista(Segment s, VistaImagen? vista)
+    {
+        if (s.Launched?.Tag is VisorImagen visor) visor.Fijar(vista ?? IGP_Soft.VistaImagen.Encajada);
+        else if (s.Launched is null) s.VistaPedida = vista;
+    }
+
+    private bool NavegarConTeclado(string accion)
+    {
+        if (_disposed) return false;
+        IntPtr activa = NativeMethods.GetForegroundWindow();
+        if (activa == IntPtr.Zero) return false;
+        foreach (PantallaMonitor t in _pantallas)
+        {
+            bool superficie = _surfaces.TryGetValue(t.Device, out DisplaySurface? s) && !s.IsDisposed && s.IsHandleCreated && s.Handle == activa;
+            Segment? seg = superficie
+                ? SegmentAt(t, Cursor.Position)
+                : t.Usable.FirstOrDefault(x => x.Launched is { } w && w.Hwnd == activa);
+            if (seg is not null) return Navegar(seg, accion);
+            if (superficie) return false;
+        }
+        return false;
     }
 
     public void Dispose()
     {
         if (_disposed) return;
+        TecladoWeb.Detener();
         _guard.Stop();
         _maintenance.Stop();
         WindowWatcher.Stop();
@@ -463,7 +526,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 if (_videosReabiertos.Add(clave))
                 {
                     Diagnostico.Log("  se reabre la zona una vez");
-                    _ = OpenAsync(t, s, link, quiet: true);
+                    _ = OpenAsync(t, s, link, quiet: true, vista: Vistas.De(s));
                     continue;
                 }
                 _videosReabiertos.Remove(clave);
@@ -550,7 +613,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         catch { return null; }
     }
 
-    public async Task<Resultado> OpenAsync(PantallaMonitor tile, Segment seg, LinkDef link, bool quiet = false)
+    public async Task<Resultado> OpenAsync(PantallaMonitor tile, Segment seg, LinkDef link, bool quiet = false, VistaImagen? vista = null)
     {
         bool isWindow = WindowManager.IsWindowSpec(link.Url);
         TipoDocumento documento = Documentos.Existe(link.Url) ? Documentos.Tipo(link.Url) : TipoDocumento.Ninguno;
@@ -565,6 +628,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             return r;
         }
 
+        seg.VistaPedida = vista;
         if (tile.Bloqueado)
         {
             Congelar(tile, seg);
@@ -618,7 +682,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             if (image is not null) WindowManager.Reposition(image, AreaOf(tile, seg));
         }
         else if (!isWindow && !office && NativeImage.Supports(link.Url))
-            image = NativeImage.Show(surface, link.Url, AreaOf(tile, seg));
+            image = NativeImage.Show(surface, link.Url, AreaOf(tile, seg), vista, () => _vistaCambiada = true);
 
         if (image is not null)
         {
@@ -701,13 +765,19 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         string tag = $"{tile.Monitor.ShortName}-{seg.Index}";
         IntPtr parent = surface.Handle;
 
-        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, link.Url, area, tag, parent, keepData));
+        VistaImagen? vista = seg.VistaPedida;
+        Task<LaunchedWindow?> launch = Task.Run(() => WindowManager.LaunchAndPlace(browser, link.Url, area, tag, parent, keepData, vista));
         _pendingLaunches.Add(launch);
         LaunchedWindow? win = null;
         string? error = null;
         try { win = await launch; }
         catch (Exception ex) { error = ex.Message; }
         finally { _pendingLaunches.Remove(launch); }
+        if (win is not null && MediaWrapper.EsImagen(link.Url))
+        {
+            win.PaginaImagen = true;
+            win.VistaPagina = vista;
+        }
 
         (PantallaMonitor? t, Segment? s) = FindPending(token);
         if (_disposed || t is null || s is null)
@@ -1114,9 +1184,9 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         if (_surfaces.TryGetValue(tile.Device, out DisplaySurface? surface) && !surface.IsDisposed) surface.BarrasAlFrente();
     }
 
-    private async Task AbrirZonaAsync(PantallaMonitor t, Segment s, LinkDef link, List<LinkDef>? pestanas, int activa, bool quiet = true)
+    private async Task AbrirZonaAsync(PantallaMonitor t, Segment s, LinkDef link, List<LinkDef>? pestanas, int activa, bool quiet = true, VistaImagen? vista = null)
     {
-        Resultado r = await OpenAsync(t, s, link, quiet);
+        Resultado r = await OpenAsync(t, s, link, quiet, vista);
         if (!r.Ok || pestanas is null || pestanas.Count < 2) return;
         foreach (LinkDef p in pestanas.Skip(1))
         {
@@ -1306,7 +1376,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 Layout = grid.IsUniform ? null : grid.Zones.ToList(),
                 Links = real
                     ? t.Congeladas.Where(c => !c.EsPestana)
-                                  .Select(c => new ZoneLayout { Zone = c.Zona, Titulo = c.Link.Titulo, Url = c.Link.Url, Pestanas = c.Pestanas, Activa = c.Activa })
+                                  .Select(c => new ZoneLayout { Zone = c.Zona, Titulo = c.Link.Titulo, Url = c.Link.Url, Pestanas = c.Pestanas, Activa = c.Activa, Vista = IGP_Soft.VistaImagen.ParaGuardar(Vistas.De(c.Win)) })
                                   .ToList()
                     : t.Segments.Where(s => s.Link is not null)
                                 .Select(s => new ZoneLayout
@@ -1314,6 +1384,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                                     Zone = s.Index, Titulo = s.Link!.Titulo, Url = s.Link.Url,
                                     Pestanas = s.Pestanas.Count > 1 ? s.Pestanas.Select(p => p.Link).ToList() : null,
                                     Activa = s.Pestanas.Count > 1 ? s.Activa : 0,
+                                    Vista = IGP_Soft.VistaImagen.ParaGuardar(Vistas.De(s)),
                                 })
                                 .ToList(),
             };
@@ -1391,7 +1462,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         }
         EnforceTile(tile);
         Notify();
-        foreach ((Segment seg, LinkDef link) in abrir) _ = OpenAsync(tile, seg, link);
+        foreach ((Segment seg, LinkDef link) in abrir) _ = OpenAsync(tile, seg, link, vista: seg.VistaPedida);
         foreach ((Segment seg, Pestana tab) in pestanas) _ = LanzarPestana(tile, seg, tab, quiet: false);
         CloseSurfaceIfEmpty(tile);
         SaveLastSession();
@@ -1456,7 +1527,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                         : z.Pestanas is { Count: > 1 } tabs ? tabs[0]
                         : LinkStore.Links.FirstOrDefault(l => l.Url.Equals(z.Url, StringComparison.OrdinalIgnoreCase))
                           ?? new LinkDef(z.Titulo, z.Url);
-                    if (s.Link?.Url.Equals(link?.Url, StringComparison.OrdinalIgnoreCase) == true) continue;
+                    if (s.Link?.Url.Equals(link?.Url, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        AplicarVista(s, z?.Vista);
+                        continue;
+                    }
 
                     if (s.Link is not null || s.Launched is not null || s.Pending is not null) CloseSeg(t, s);
                     if (link is not null) wanted.Add((t, s, link, z));
@@ -1465,7 +1540,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
 
             foreach ((PantallaMonitor t, Segment s, LinkDef link, ZoneLayout? z) in wanted)
                 if (!_openedUrls.Contains(link.Url))
-                    _ = AbrirZonaAsync(t, s, link, z?.Pestanas, z?.Activa ?? 0);
+                    _ = AbrirZonaAsync(t, s, link, z?.Pestanas, z?.Activa ?? 0, vista: z?.Vista);
         }
         finally { _applyingProfile = false; }
 
