@@ -1721,6 +1721,12 @@ internal static class NativeMethods
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X, Y; }
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT p);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 

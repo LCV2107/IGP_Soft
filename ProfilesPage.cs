@@ -335,7 +335,7 @@ internal sealed class ProfilesPage : Page
 
         Rectangle flecha = Flecha(e.Bounds);
         Point raton = _list.PointToClient(Cursor.Position);
-        bool encima = flecha.Contains(raton);
+        bool encima = Flecha(_list.GetItemRectangle(e.Index)).Contains(raton);
         Theme.FillRound(g, abierto || encima ? Theme.AccentSoft : Color.FromArgb(241, 245, 249), flecha, 8);
         TextRenderer.DrawText(g, abierto ? "▴" : "▾", Theme.Section, flecha, Theme.Accent,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);

@@ -109,7 +109,8 @@ internal sealed class ListaSinParpadeo : ListBox
             return;
         }
         using BufferedGraphics buffer = BufferedGraphicsManager.Current.Allocate(e.Graphics, e.Bounds);
-        base.OnDrawItem(new DrawItemEventArgs(buffer.Graphics, e.Font, e.Bounds, e.Index, e.State, e.ForeColor, e.BackColor));
+        buffer.Graphics.ResetTransform();
+        base.OnDrawItem(new DrawItemEventArgs(buffer.Graphics, e.Font, new Rectangle(Point.Empty, e.Bounds.Size), e.Index, e.State, e.ForeColor, e.BackColor));
         buffer.Render(e.Graphics);
     }
 }

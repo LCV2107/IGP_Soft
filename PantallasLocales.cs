@@ -1928,7 +1928,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         });
     }
 
-    internal readonly record struct VentanaZona(IntPtr Hwnd, Rectangle Ventana, Rectangle Visible);
+    internal readonly record struct VentanaZona(IntPtr Hwnd, Rectangle Ventana, Rectangle Visible, string? Url = null);
 
     private static List<VentanaZona> ZonasProyectadas(PantallaMonitor t)
     {
@@ -1942,7 +1942,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             Rectangle ventana = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
             Rectangle visible = Rectangle.Intersect(ventana, pantalla);
             if (visible.Width < 4 || visible.Height < 4) continue;
-            lista.Add(new VentanaZona(w.Hwnd, ventana, visible));
+            lista.Add(new VentanaZona(w.Hwnd, ventana, visible, s.Link?.Url));
         }
         return lista;
     }
@@ -1961,16 +1961,73 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
             foreach (VentanaZona z in zonas)
             {
-                using Bitmap? img = CapturarVentana(z.Hwnd, z.Ventana);
-                if (img is null) continue;
                 var origen = new Rectangle(z.Visible.X - z.Ventana.X, z.Visible.Y - z.Ventana.Y, z.Visible.Width, z.Visible.Height);
                 int x = (int)Math.Round((z.Visible.X - monitor.X) * k), y = (int)Math.Round((z.Visible.Y - monitor.Y) * k);
                 int r = (int)Math.Round((z.Visible.Right - monitor.X) * k), b = (int)Math.Round((z.Visible.Bottom - monitor.Y) * k);
-                g.DrawImage(img, new Rectangle(x, y, Math.Max(1, r - x), Math.Max(1, b - y)), origen, GraphicsUnit.Pixel);
+                var destino = new Rectangle(x, y, Math.Max(1, r - x), Math.Max(1, b - y));
+                using Bitmap? img = CapturarVentana(z.Hwnd, z.Ventana);
+                if (img is not null && !Uniforme(img, origen))
+                {
+                    g.DrawImage(img, destino, origen, GraphicsUnit.Pixel);
+                    continue;
+                }
+                if (SinTapar(z))
+                {
+                    using var pantalla = new Bitmap(z.Visible.Width, z.Visible.Height);
+                    using (Graphics gp = Graphics.FromImage(pantalla)) gp.CopyFromScreen(z.Visible.Location, Point.Empty, z.Visible.Size);
+                    if (!Uniforme(pantalla, new Rectangle(Point.Empty, pantalla.Size)))
+                    {
+                        g.DrawImage(pantalla, destino);
+                        continue;
+                    }
+                }
+                using Image? mini = MiniaturaVideo(z.Url);
+                if (mini is not null)
+                {
+                    float e = Math.Min(destino.Width / (float)mini.Width, destino.Height / (float)mini.Height);
+                    int w = (int)(mini.Width * e), h = (int)(mini.Height * e);
+                    g.DrawImage(mini, new Rectangle(destino.X + (destino.Width - w) / 2, destino.Y + (destino.Height - h) / 2, w, h));
+                    continue;
+                }
+                if (img is not null) g.DrawImage(img, destino, origen, GraphicsUnit.Pixel);
             }
             return thumb;
         }
         catch { return null; }
+    }
+
+    internal static bool Uniforme(Bitmap bmp, Rectangle area)
+    {
+        area.Intersect(new Rectangle(Point.Empty, bmp.Size));
+        if (area.Width <= 0 || area.Height <= 0) return true;
+        Color c0 = bmp.GetPixel(area.X + area.Width / 2, area.Y + area.Height / 2);
+        for (int i = 0; i < 12; i++)
+            for (int j = 0; j < 8; j++)
+            {
+                Color c = bmp.GetPixel(area.X + (2 * i + 1) * area.Width / 24, area.Y + (2 * j + 1) * area.Height / 16);
+                if (Math.Abs(c.R - c0.R) + Math.Abs(c.G - c0.G) + Math.Abs(c.B - c0.B) > 24) return false;
+            }
+        return true;
+    }
+
+    private static bool SinTapar(VentanaZona z)
+    {
+        const uint GA_ROOT = 2;
+        IntPtr raiz = NativeMethods.GetAncestor(z.Hwnd, GA_ROOT);
+        for (int i = 1; i <= 3; i++)
+            for (int j = 1; j <= 3; j++)
+            {
+                var p = new NativeMethods.POINT { X = z.Visible.X + i * z.Visible.Width / 4, Y = z.Visible.Y + j * z.Visible.Height / 4 };
+                if (NativeMethods.GetAncestor(NativeMethods.WindowFromPoint(p), GA_ROOT) != raiz) return false;
+            }
+        return true;
+    }
+
+    private static Image? MiniaturaVideo(string? url)
+    {
+        if (string.IsNullOrEmpty(url) || url.Contains("://")) return null;
+        string ruta = AssetStore.Resolve(url);
+        return MediaWrapper.EsVideo(ruta) && File.Exists(ruta) ? Thumbnails.FromShell(ruta, 640) : null;
     }
 
     private static Bitmap? CapturarVentana(IntPtr hwnd, Rectangle ventana)

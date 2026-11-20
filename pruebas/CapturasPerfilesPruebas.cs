@@ -89,4 +89,56 @@ public sealed class CapturasPerfilesPruebas : IDisposable
         t.Join();
         Assert.Null(error);
     }
+
+    [Fact]
+    public void Una_captura_negra_o_de_un_color_se_detecta()
+    {
+        using var bmp = new Bitmap(200, 100);
+        using (Graphics g = Graphics.FromImage(bmp)) g.Clear(Color.Black);
+        Assert.True(PantallasLocales.Uniforme(bmp, new Rectangle(0, 0, 200, 100)));
+        using (Graphics g = Graphics.FromImage(bmp)) g.FillRectangle(Brushes.Orange, 120, 0, 80, 100);
+        Assert.False(PantallasLocales.Uniforme(bmp, new Rectangle(0, 0, 200, 100)));
+        Assert.True(PantallasLocales.Uniforme(bmp, new Rectangle(0, 0, 100, 100)));
+    }
+
+    [Fact]
+    public void La_lista_de_perfiles_dibuja_el_texto_en_todas_las_tarjetas()
+    {
+        var colores = new List<Color>();
+        Exception? error = null;
+        var t = new Thread(() =>
+        {
+            try
+            {
+                using var f = new Form { Size = new Size(300, 300), StartPosition = FormStartPosition.Manual, Location = new Point(60, 60), ShowInTaskbar = false };
+                var l = new ListaSinParpadeo { Dock = DockStyle.Fill, IntegralHeight = false, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 60 };
+                using var fuente = new Font("Segoe UI", 20);
+                l.DrawItem += (_, e) =>
+                {
+                    e.Graphics.FillRectangle(Brushes.White, e.Bounds);
+                    TextRenderer.DrawText(e.Graphics, "██████", fuente, new Point(e.Bounds.X + 5, e.Bounds.Y + 10), Color.Red);
+                };
+                f.Controls.Add(l);
+                l.Items.Add("a");
+                l.Items.Add("b");
+                f.Show();
+                Application.DoEvents();
+                using var bmp = new Bitmap(l.Width, l.Height);
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    IntPtr hdc = g.GetHdc();
+                    NativeMethods.PrintWindow(l.Handle, hdc, NativeMethods.PW_RENDERFULLCONTENT);
+                    g.ReleaseHdc(hdc);
+                }
+                colores.Add(bmp.GetPixel(20, 30));
+                colores.Add(bmp.GetPixel(20, 90));
+            }
+            catch (Exception e) { error = e; }
+        });
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        t.Join();
+        Assert.Null(error);
+        Assert.All(colores, c => Assert.True(c.R > 200 && c.G < 60 && c.B < 60, c.ToString()));
+    }
 }
