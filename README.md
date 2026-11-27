@@ -55,8 +55,8 @@ Al hacer clic en una zona se abre un panel junto al mouse:
 | **▦ Grilla** | *Diseñar grilla de este monitor…*, *Volver a 1 zona*, *Volver todos los monitores a 1 zona* y *No usar esta zona*. |
 | **🖥 Monitor** | *Bloquear proyección*, *Omitir esta pantalla*, *Cerrar todo en este monitor* y, si hay varios monitores o corresponde, *Bloquear todos los monitores*, *Separar monitores combinados* y *Restablecer numeración*. |
 
-- **Qué mostrar**: tu lista de enlaces como tarjetas, con una vista previa: la miniatura de las imágenes, videos y documentos (también desde IGPDesk) y, en páginas web y ventanas, una captura de la última vez que se mostraron en una zona. Lo que nunca se mostró lleva un icono de color según el tipo. Escribe para **buscar** y usa los filtros **Todo**, **Páginas web**, **Imágenes**, **Videos**, **Documentos** y **Ventanas**. Lo que ya está en esta zona dice *✓ En esta zona*; lo que está abierto en otra zona aparece atenuado con *En monitor N · zona N*.
-- **Abajo**, botones grandes como los de arriba: **⇥ Seguir a la siguiente**, **▶ Mostrar archivo o URL** (uno o varios archivos; si eliges varios se reparten en el monitor), **＋ Agregar a la lista** (agrega archivos o una dirección web a las tarjetas sin mostrarlos todavía), **▣ Adjuntar ventana** y, en páginas web y ventanas adjuntas, **⌨ Escribir**.
+- **Qué mostrar**: tu lista de enlaces como tarjetas, con una vista previa: la miniatura de las imágenes, videos y documentos (también desde IGPDesk) y, en páginas web y ventanas, una captura de la última vez que se mostraron en una zona. Las páginas web que nunca se mostraron también tienen vista previa: IGP_Soft la prepara en segundo plano, sin abrir ventanas, la primera vez que aparecen en el panel (si la página pide iniciar sesión, la vista previa muestra esa pantalla hasta que se muestre en una zona). Las ventanas que nunca se mostraron llevan un icono. Escribe para **buscar** y usa los filtros **Todo**, **Páginas web**, **Imágenes**, **Videos**, **Documentos** y **Ventanas**. Lo que ya está en esta zona dice *✓ En esta zona*; lo que está abierto en otra zona aparece atenuado con *En monitor N · zona N*.
+- **Junto a Grilla y Monitor**, más botones: **⇥ Seguir a la siguiente**, **▶ Mostrar archivo** (uno o varios archivos, o una dirección web; si eliges varios se reparten en el monitor), **＋ Agregar a la lista** (agrega archivos o una dirección web a las tarjetas sin mostrarlos todavía), **▣ Adjuntar ventana** y, en páginas web y ventanas adjuntas, **⌨ Escribir**.
 
 **Mover el panel:** arrástralo desde su parte de arriba (la franja oscura). La próxima vez se abre en el mismo lugar; si ese lugar ya no está en ninguna pantalla, se abre junto al mouse.
 
@@ -126,7 +126,7 @@ Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. Tamb
 
 ## 4. Mostrar una imagen, un video, un documento u otra página
 
-En el panel de cualquier zona, pulsa **▶ Mostrar archivo o URL**:
+En el panel de cualquier zona, pulsa **▶ Mostrar archivo**:
 
 1. Elige un archivo de tu PC (imagen, video, PDF, Word o PowerPoint), o pega una dirección web.
 2. Si quieres tenerlo siempre disponible, deja activado *Agregar también a la lista de enlaces*.
@@ -181,7 +181,7 @@ Para Word y PowerPoint, el equipo necesita tener Microsoft Office instalado. Por
 
 Puedes elegir **varios archivos** y repartirlos en un monitor de una sola vez:
 
-- Clic en una zona → **▶ Mostrar archivo o URL → Examinar** y elige varios archivos.
+- Clic en una zona → **▶ Mostrar archivo → Examinar** y elige varios archivos.
 - **Arrastra** varios archivos desde el Explorador de Windows sobre un monitor del panel (si arrastras uno solo sobre una zona, se abre directamente ahí).
 - En la **Galería**, elige varios y pulsa **Organizar en un monitor…** (ver punto 12).
 

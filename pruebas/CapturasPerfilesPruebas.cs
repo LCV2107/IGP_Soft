@@ -65,12 +65,17 @@ public sealed class CapturasPerfilesPruebas : IDisposable
                 using var f = new Form
                 {
                     FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual,
-                    Bounds = new Rectangle(40, 40, 400, 200), BackColor = Color.Lime, ShowInTaskbar = false,
+                    Bounds = new Rectangle(40, 40, 400, 200), BackColor = Color.Lime, ShowInTaskbar = false, TopMost = true,
                 };
                 var zona = new Panel { Bounds = new Rectangle(0, 0, 200, 200), BackColor = Color.Red };
                 f.Controls.Add(zona);
                 f.Show();
-                Application.DoEvents();
+                for (int i = 0; i < 10; i++)
+                {
+                    f.Refresh();
+                    Application.DoEvents();
+                    Thread.Sleep(30);
+                }
                 NativeMethods.GetWindowRect(zona.Handle, out NativeMethods.RECT r);
                 Rectangle ventana = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
                 var monitor = new MonitorInfo("M", ventana.X, ventana.Y, 400, 200, true);

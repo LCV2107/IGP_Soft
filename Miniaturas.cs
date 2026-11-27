@@ -91,7 +91,7 @@ internal static class Miniaturas
         bool archivo = tipo is TipoEnlace.Imagen or TipoEnlace.Video or TipoEnlace.Documento;
         string? ruta = archivo ? Archivo(url) : CapturasEnlaces.Existente(url);
         Func<string, Task<byte[]?>>? remota = Remota;
-        if (ruta is null && (remota is null || (archivo && !AssetStore.IsAssetPath(url)) || tipo == TipoEnlace.Otro)) return null;
+        if (ruta is null && tipo != TipoEnlace.Web && (remota is null || (archivo && !AssetStore.IsAssetPath(url)) || tipo == TipoEnlace.Otro)) return null;
         lock (Cerrojo)
         {
             if (Hechas.TryGetValue(url, out Image? lista)) return lista;
@@ -103,7 +103,9 @@ internal static class Miniaturas
             Image? img = null;
             try
             {
-                byte[]? jpeg = ruta is null ? await remota!(url).ConfigureAwait(false) : archivo ? null : File.ReadAllBytes(ruta);
+                byte[]? jpeg = ruta is null ? remota is null ? null : await remota(url).ConfigureAwait(false) : archivo ? null : File.ReadAllBytes(ruta);
+                if (jpeg is null && ruta is null && tipo == TipoEnlace.Web && (jpeg = await PreviasWeb.Generar(url).ConfigureAwait(false)) is not null)
+                    CapturasEnlaces.Guardar(url, jpeg);
                 if (jpeg is { Length: > 0 })
                 {
                     using var ms = new MemoryStream(jpeg);
@@ -270,6 +272,67 @@ internal static class DibujoPerfil
         float k = Math.Max(caja.Width / (float)img.Width, caja.Height / (float)img.Height);
         int w = (int)(img.Width * k), h = (int)(img.Height * k);
         return new Rectangle(caja.X + (caja.Width - w) / 2, caja.Y + (caja.Height - h) / 2, w, h);
+    }
+}
+
+internal static class PreviasWeb
+{
+    private static readonly SemaphoreSlim Turno = new(1, 1);
+    private static Browser? _navegador;
+    private static bool _buscado;
+
+    public static string Carpeta => Path.Combine(Path.GetTempPath(), "IGP_Soft.previas");
+
+    public static async Task<byte[]?> Generar(string url)
+    {
+        if (!PestanasWeb.EsWeb(url)) return null;
+        await Turno.WaitAsync().ConfigureAwait(false);
+        string png = Path.Combine(Carpeta, Guid.NewGuid().ToString("N") + ".png");
+        try
+        {
+            if (!_buscado)
+            {
+                _buscado = true;
+                _navegador = BrowserLocator.InstalledAll().FirstOrDefault(b => b.Family == BrowserFamily.Chromium);
+            }
+            if (_navegador is null) return null;
+            Directory.CreateDirectory(Carpeta);
+            var psi = new System.Diagnostics.ProcessStartInfo(_navegador.ExePath) { UseShellExecute = false, CreateNoWindow = true };
+            foreach (string a in new[]
+                     {
+                         "--headless=new", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--no-first-run", "--disable-extensions",
+                         "--window-size=1280,800", "--virtual-time-budget=8000", "--user-data-dir=" + Path.Combine(Carpeta, "perfil"),
+                         "--screenshot=" + png, url,
+                     })
+                psi.ArgumentList.Add(a);
+            using System.Diagnostics.Process? p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return null;
+            try { p.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal; } catch { }
+            using var limite = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await p.WaitForExitAsync(limite.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(true); } catch { }
+                return null;
+            }
+            if (!File.Exists(png)) return null;
+            using var ms = new MemoryStream(await File.ReadAllBytesAsync(png).ConfigureAwait(false));
+            using Image img = Image.FromStream(ms);
+            int ancho = Math.Min(320, img.Width), alto = Math.Max(1, img.Height * ancho / img.Width);
+            using var chica = new Bitmap(ancho, alto);
+            using (Graphics g = Graphics.FromImage(chica))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(img, 0, 0, ancho, alto);
+            }
+            return Imagenes.Jpeg(chica);
+        }
+        catch { return null; }
+        finally
+        {
+            try { File.Delete(png); } catch { }
+            Turno.Release();
+        }
     }
 }
 

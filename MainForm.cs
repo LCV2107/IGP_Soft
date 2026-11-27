@@ -1095,7 +1095,7 @@ internal sealed class MainForm : Form
         if (zona.Desactivada || zona.Estado == EstadosZona.Abriendo) return Array.Empty<AccionZona>();
         var lista = new List<AccionZona>
         {
-            new AccionZona("▶", "Mostrar archivo o URL", _ => AddCustomElement(m, zona), Ayuda: "Muestra en esta zona uno o varios archivos, o una dirección web. Si eliges varios, se reparten en el monitor."),
+            new AccionZona("▶", "Mostrar archivo", _ => AddCustomElement(m, zona), Ayuda: "Muestra en esta zona uno o varios archivos, o una dirección web. Si eliges varios, se reparten en el monitor."),
             new AccionZona("＋", "Agregar a la lista", _ => AgregarALista(m, zona), Ayuda: "Agrega archivos o una dirección web a la lista de este panel sin mostrarlos todavía."),
             new AccionZona("▣", "Adjuntar ventana", c => MostrarVentanas(m, zona, c), Cierra: false, Ayuda: "Mostrar en esta zona una ventana que ya está abierta."),
         };

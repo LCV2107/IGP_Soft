@@ -20,14 +20,12 @@ internal sealed class PanelZonaForm : Form
     private DateTime _graciaHasta;
 
     private readonly Panel _cabecera = new() { Dock = DockStyle.Top, Height = 78 };
-    private readonly FlowLayoutPanel _botones = new() { Dock = DockStyle.Top, Height = 92, WrapContents = false, AutoScroll = false, Padding = new Padding(14, 10, 14, 4) };
+    private readonly FlowLayoutPanel _botones = new() { Dock = DockStyle.Top, Height = 92, WrapContents = true, AutoScroll = false, Padding = new Padding(14, 10, 14, 4) };
     private readonly Panel _busqueda = new() { Dock = DockStyle.Top, Height = 50, Padding = new Padding(14, 6, 14, 6) };
     private readonly RoundedTextBox _buscar = new("Buscar qué mostrar…  (escribe para filtrar)", 300);
     private readonly FlowLayoutPanel _filtros = new() { Dock = DockStyle.Top, Height = 38, WrapContents = false, Padding = new Padding(12, 2, 14, 0) };
     private readonly Panel _desplazable = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14, 4, 6, 4) };
     private readonly LienzoTarjetas _tarjetas = new();
-    private readonly Panel _piePanel = new() { Dock = DockStyle.Bottom, Height = 92 };
-    private readonly FlowLayoutPanel _pieBotones = new() { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(14, 10, 14, 4) };
     private readonly Label _vacio = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TextMuted, Visible = false };
     private TipoEnlace? _filtro;
 
@@ -94,23 +92,19 @@ internal sealed class PanelZonaForm : Form
             _buscar.Box.AppendText(c.ToString());
         };
 
-        _piePanel.BackColor = Theme.SurfaceAlt;
-        _piePanel.Paint += (_, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, 0, 0, _piePanel.Width, 0); };
-        _pieBotones.BackColor = Theme.SurfaceAlt;
-        _piePanel.Controls.Add(_pieBotones);
 
         Controls.Add(_desplazable);
         Controls.Add(_filtros);
         Controls.Add(_busqueda);
         Controls.Add(_botones);
         Controls.Add(_cabecera);
-        Controls.Add(_piePanel);
 
         Miniaturas.Iniciar();
         Miniaturas.Lista += _tarjetas.Invalidate;
         FormClosed += (_, _) => Miniaturas.Lista -= _tarjetas.Invalidate;
         Deactivate += (_, _) =>
         {
+            if (_desplegados > 0) return;
             if (DateTime.Now < _graciaHasta)
             {
                 var t = new System.Windows.Forms.Timer { Interval = 700 };
@@ -183,20 +177,18 @@ internal sealed class PanelZonaForm : Form
         SuspendLayout();
         foreach (Control c in _botones.Controls.Cast<Control>().ToList()) c.Dispose();
         _botones.Controls.Clear();
-        foreach (AccionZona a in _acciones(m, z)) _botones.Controls.Add(new BotonAccion(a, Ejecutar));
         bool contenido = !z.Desactivada && z.Estado != EstadosZona.Abriendo;
-        foreach (Control c in _pieBotones.Controls.Cast<Control>().ToList()) c.Dispose();
-        _pieBotones.Controls.Clear();
-        var pie = new List<AccionZona>();
+        var acciones = new List<AccionZona>(_acciones(m, z));
         if (contenido)
-            pie.Add(new AccionZona("⇥", "Seguir a la siguiente", _ =>
+            acciones.Add(new AccionZona("⇥", "Seguir a la siguiente", _ =>
             {
                 Config.Set(ClaveSeguir, Seguir ? "0" : "1");
                 BeginInvoke(Construir);
             }, Ayuda: "Encendido: al elegir algo, el panel pasa solo a la siguiente zona libre para seguir llenando el monitor.", Cierra: false, Marcado: Seguir));
-        pie.AddRange(_pie(m, z));
-        foreach (AccionZona a in pie) _pieBotones.Controls.Add(new BotonAccion(a, Ejecutar));
-        _piePanel.Visible = pie.Count > 0;
+        acciones.AddRange(_pie(m, z));
+        foreach (AccionZona a in acciones) _botones.Controls.Add(new BotonAccion(a, Ejecutar));
+        int porFila = Math.Max(1, (ClientSize.Width - _botones.Padding.Horizontal) / 84);
+        _botones.Height = _botones.Padding.Vertical + (acciones.Count + porFila - 1) / porFila * 78;
         _busqueda.Visible = _filtros.Visible = contenido;
         _tarjetas.Visible = contenido;
         _vacio.Visible = !contenido;
@@ -276,7 +268,7 @@ internal sealed class PanelZonaForm : Form
         if (lista.Count == 0)
         {
             _vacio.Visible = true;
-            _vacio.Text = todos.Count == 0 ? "La lista de enlaces está vacía. Usa «Agregar a la lista» o «Mostrar archivo o URL»." : "No hay nada que coincida con la búsqueda.";
+            _vacio.Text = todos.Count == 0 ? "La lista de enlaces está vacía. Usa «Agregar a la lista» o «Mostrar archivo»." : "No hay nada que coincida con la búsqueda.";
         }
         else if (Zona is { Desactivada: false } z && z.Estado != EstadosZona.Abriendo) _vacio.Visible = false;
     }
@@ -365,12 +357,27 @@ internal sealed class PanelZonaForm : Form
         TextRenderer.DrawText(g, "✕", Theme.Section, x, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
+    private static int _desplegados;
+
+    public static void Desplegar(ToolStripDropDown d, Control junto)
+    {
+        Form? panel = junto.FindForm();
+        _desplegados++;
+        d.Closed += (_, _) =>
+        {
+            _desplegados--;
+            if (d.IsHandleCreated) d.BeginInvoke(d.Dispose); else d.Dispose();
+            if (panel is { IsDisposed: false, Visible: true, IsHandleCreated: true })
+                panel.BeginInvoke(() => { if (!panel.IsDisposed && Form.ActiveForm is null) panel.Activate(); });
+        };
+        d.Show(junto, new Point(0, junto.Height));
+    }
+
     public static void MostrarSubmenu(ToolStripMenuItem sub, Control junto)
     {
         ContextMenuStrip menu = Theme.Menu();
         menu.Items.AddRange(sub.DropDownItems.Cast<ToolStripItem>().ToArray());
-        menu.Closed += (_, _) => junto.BeginInvoke(menu.Dispose);
-        menu.Show(junto, new Point(0, junto.Height));
+        PanelZonaForm.Desplegar(menu, junto);
     }
 }
 
@@ -425,8 +432,7 @@ internal sealed class ControlZoom : Control
         var host = new ToolStripControlHost(control) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = control.Size };
         var drop = new ToolStripDropDown { Padding = new Padding(1) };
         drop.Items.Add(host);
-        drop.Closed += (_, _) => junto.BeginInvoke(drop.Dispose);
-        drop.Show(junto, new Point(0, junto.Height));
+        PanelZonaForm.Desplegar(drop, junto);
     }
 }
 
@@ -483,8 +489,7 @@ internal sealed class ControlEscribir : Control
         var host = new ToolStripControlHost(control) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = control.Size };
         var drop = new ToolStripDropDown { Padding = new Padding(1) };
         drop.Items.Add(host);
-        drop.Closed += (_, _) => junto.BeginInvoke(drop.Dispose);
-        drop.Show(junto, new Point(0, junto.Height));
+        PanelZonaForm.Desplegar(drop, junto);
         control._texto.Focus();
     }
 }
@@ -555,9 +560,9 @@ internal sealed class BotonAccion : Control
         Theme.FillRound(g, fondo, r, 10);
         Theme.DrawRound(g, resaltado ? Theme.Accent : _encima ? (_accion.Peligro ? Theme.Danger : Theme.Accent) : Theme.Border, r, 10, resaltado ? 1.6f : 1f);
         Color tinta = !Enabled ? Theme.TextSubtle : _accion.Peligro ? Theme.Danger : Theme.Accent;
-        TextRenderer.DrawText(g, _accion.Icono, Grande, new Rectangle(0, 6, Width, 34), tinta,
+        TextRenderer.DrawText(g, _accion.Icono, Grande, new Rectangle(0, 3, Width, 30), tinta,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(g, _accion.Texto, Theme.Small, new Rectangle(2, 40, Width - 4, Height - 44), Enabled ? Theme.Text : Theme.TextSubtle,
+        TextRenderer.DrawText(g, _accion.Texto, Theme.Small, new Rectangle(2, 33, Width - 4, Height - 35), Enabled ? Theme.Text : Theme.TextSubtle,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
     }
 
