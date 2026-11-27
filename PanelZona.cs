@@ -201,8 +201,15 @@ internal sealed class PanelZonaForm : Form
 
     private void Ejecutar(AccionZona a, Control c)
     {
-        a.Clic(c);
-        if (a.Cierra && !IsDisposed) Close();
+        if (!a.Cierra)
+        {
+            a.Clic(c);
+            return;
+        }
+        Form? dueno = Owner;
+        Close();
+        if (dueno is { IsDisposed: false, IsHandleCreated: true }) dueno.BeginInvoke(() => a.Clic(dueno));
+        else a.Clic(c);
     }
 
     public void Actualizar()
