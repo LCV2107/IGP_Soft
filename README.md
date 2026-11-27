@@ -55,10 +55,14 @@ Al hacer clic en una zona se abre un panel junto al mouse:
 | **▦ Grilla** | *Diseñar grilla de este monitor…*, *Volver a 1 zona*, *Volver todos los monitores a 1 zona* y *No usar esta zona*. |
 | **🖥 Monitor** | *Bloquear proyección*, *Omitir esta pantalla*, *Cerrar todo en este monitor* y, si hay varios monitores o corresponde, *Bloquear todos los monitores*, *Separar monitores combinados* y *Restablecer numeración*. |
 
-- **Qué mostrar**: tu lista de enlaces como tarjetas, con la miniatura de las imágenes, videos y documentos y un icono de color según el tipo. Escribe para **buscar** y usa los filtros **Todo**, **Páginas web**, **Imágenes**, **Videos**, **Documentos** y **Ventanas**. Lo que ya está en esta zona dice *✓ En esta zona*; lo que está abierto en otra zona aparece atenuado con *En monitor N · zona N*.
-- **Abajo**: **＋ Agregar archivo o URL…** (uno o varios archivos; si eliges varios se reparten en el monitor) y **▣ Adjuntar ventana…**.
+- **Qué mostrar**: tu lista de enlaces como tarjetas, con una vista previa: la miniatura de las imágenes, videos y documentos (también desde IGPDesk) y, en páginas web y ventanas, una captura de la última vez que se mostraron en una zona. Lo que nunca se mostró lleva un icono de color según el tipo. Escribe para **buscar** y usa los filtros **Todo**, **Páginas web**, **Imágenes**, **Videos**, **Documentos** y **Ventanas**. Lo que ya está en esta zona dice *✓ En esta zona*; lo que está abierto en otra zona aparece atenuado con *En monitor N · zona N*.
+- **Abajo**, botones grandes como los de arriba: **⇥ Seguir a la siguiente**, **▶ Mostrar archivo o URL** (uno o varios archivos; si eliges varios se reparten en el monitor), **＋ Agregar a la lista** (agrega archivos o una dirección web a las tarjetas sin mostrarlos todavía), **▣ Adjuntar ventana** y, en páginas web y ventanas adjuntas, **⌨ Escribir**.
 
-**Llenar un monitor sin volver a abrir el panel:** activa **Seguir con la siguiente zona**. Cada vez que eliges algo, el panel pasa solo a la siguiente zona libre del monitor (el dibujito de arriba marca cuál). Cuando no quedan zonas libres, se cierra. La opción se recuerda.
+**Mover el panel:** arrástralo desde su parte de arriba (la franja oscura). La próxima vez se abre en el mismo lugar; si ese lugar ya no está en ninguna pantalla, se abre junto al mouse.
+
+**Escribir en una página (por ejemplo, un inicio de sesión):** haz clic en la zona sobre el campo y escribe con el teclado. Desde el panel, **⌨ Escribir** abre un cuadro: escribe el texto y pulsa **Enviar texto** (o Enter); **⇥ Tab** pasa al campo siguiente y **↵ Enter** envía el formulario. Desde IGPDesk funciona igual y el texto no se guarda en ningún lado.
+
+**Llenar un monitor sin volver a abrir el panel:** activa **⇥ Seguir a la siguiente** (se ve marcado en azul). Cada vez que eliges algo, el panel pasa solo a la siguiente zona libre del monitor (el dibujito de arriba marca cuál). Cuando no quedan zonas libres, se cierra. La opción se recuerda.
 
 **Con el teclado:** escribe para buscar, **↓** o **Enter** para pasar a las tarjetas, flechas para moverte, **Enter** para elegir y **Esc** para cerrar el panel. El panel también se cierra al hacer clic fuera de él.
 
@@ -122,7 +126,7 @@ Las zonas **sin usar** no se pueden elegir, y **Abrir en orden** las salta. Tamb
 
 ## 4. Mostrar una imagen, un video, un documento u otra página
 
-En el panel de cualquier zona, pulsa **＋ Agregar archivo o URL…**:
+En el panel de cualquier zona, pulsa **▶ Mostrar archivo o URL**:
 
 1. Elige un archivo de tu PC (imagen, video, PDF, Word o PowerPoint), o pega una dirección web.
 2. Si quieres tenerlo siempre disponible, deja activado *Agregar también a la lista de enlaces*.
@@ -177,7 +181,7 @@ Para Word y PowerPoint, el equipo necesita tener Microsoft Office instalado. Por
 
 Puedes elegir **varios archivos** y repartirlos en un monitor de una sola vez:
 
-- Clic en una zona → **＋ Agregar archivo o URL… → Examinar** y elige varios archivos.
+- Clic en una zona → **▶ Mostrar archivo o URL → Examinar** y elige varios archivos.
 - **Arrastra** varios archivos desde el Explorador de Windows sobre un monitor del panel (si arrastras uno solo sobre una zona, se abre directamente ahí).
 - En la **Galería**, elige varios y pulsa **Organizar en un monitor…** (ver punto 12).
 
@@ -206,12 +210,14 @@ Desde el panel, las pestañas están en clic en la zona → **▤ Pestañas**. L
 Puedes poner en una zona cualquier programa que ya tengas abierto (Excel, un visor, otra aplicación de monitoreo, etc.):
 
 1. Abre primero el programa que quieres mostrar.
-2. En el panel, haz clic en la zona y pulsa **▣ Adjuntar ventana…** (abajo en el panel de la zona).
+2. En el panel, haz clic en la zona y pulsa **▣ Adjuntar ventana** (abajo en el panel de la zona).
 3. Elige la ventana de la lista. Se coloca sin bordes y se adapta al tamaño de la zona.
 
 Para quitarla, haz clic en la zona y pulsa **✕ Soltar ventana**: vuelve al escritorio con su tamaño y posición originales. Al salir de IGP_Soft también se devuelven todas; **nunca se cierran**.
 
 Si guardas un perfil con ventanas adjuntas, al abrirlo se vuelven a adjuntar, siempre que esos programas ya estén abiertos.
+
+Algunos programas cambian solos su tamaño o su posición. Si uno lo hace una y otra vez, IGP_Soft deja de acomodarlo para que no tiemble y lo deja como el programa quiere dentro de su zona; al cambiar la grilla lo vuelve a intentar.
 
 > Las aplicaciones de la Tienda de Windows (Configuración, Calculadora…) no se pueden adjuntar. Si un programa se ejecuta como administrador, abre IGP_Soft también como administrador.
 
@@ -535,6 +541,7 @@ Para pasar tus datos de una forma a la otra, usa **⇪ Exportar y copias → Cop
 | `IGP_Soft.config.txt` | Navegador elegido y otros ajustes |
 | `IGP_Soft.galeria.json` | Las carpetas de la galería |
 | `IGP_Soft.perfiles.capturas\` | Las capturas de los monitores que muestra la vista previa de cada perfil |
+| `IGP_Soft.enlaces.capturas\` | Las vistas previas de las páginas web y ventanas que muestran las tarjetas del panel de zona |
 | `Assets\` | Imágenes, videos y documentos que agregaste |
 | `IGP_Soft_Datos\` | Sesiones iniciadas (solo si activaste el punto 9) |
 | `Copias de seguridad\` | Copias automáticas hechas antes de restaurar o actualizar |

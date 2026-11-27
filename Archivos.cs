@@ -615,6 +615,12 @@ internal sealed class RecepcionArchivos : IDisposable
 
     public async Task<JsonObject> Miniatura(long id, JsonElement m)
     {
+        if (CapturasEnlaces.Existente(Protocolo.Texto(m, "url")) is string captura)
+        {
+            JsonObject c = Ok(id);
+            c["jpeg"] = Convert.ToBase64String(await File.ReadAllBytesAsync(captura).ConfigureAwait(false));
+            return c;
+        }
         if (Resolver(Protocolo.Texto(m, "url")) is not string full || !File.Exists(full)) return Falla(id, "archivo_no_encontrado");
         int ancho = Math.Clamp((int)(Protocolo.Numero(m, "ancho") ?? 256), 64, 512);
         byte[]? jpeg = await Imagenes.MiniaturaJpeg(full, ancho).ConfigureAwait(false);

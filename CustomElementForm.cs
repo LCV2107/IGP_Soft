@@ -13,11 +13,11 @@ internal sealed class CustomElementForm : Form
 
     private readonly string? _filtro;
 
-    public CustomElementForm(int monitorNumber, string? filtro = null)
+    public CustomElementForm(int monitorNumber, string? filtro = null, bool soloLista = false)
     {
         _filtro = filtro;
         Theme.StyleWindow(this, darkCaption: false);
-        Text = $"Mostrar en el monitor {monitorNumber}";
+        Text = soloLista ? "Agregar a la lista" : $"Mostrar en el monitor {monitorNumber}";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -38,7 +38,8 @@ internal sealed class CustomElementForm : Form
         _add.Width = 470;
         card.Controls.AddRange(new Control[] { title, l1, _tituloBox, l2, _targetBox, browse, _add });
 
-        var ok = new ModernButton("Mostrar", ButtonKind.Primary, "▶") { DialogResult = DialogResult.OK, Location = new Point(300, 248), Size = new Size(110, 38) };
+        _add.Visible = !soloLista;
+        var ok = new ModernButton(soloLista ? "Agregar" : "Mostrar", ButtonKind.Primary, soloLista ? "＋" : "▶") { DialogResult = DialogResult.OK, Location = new Point(300, 248), Size = new Size(110, 38) };
         var cancel = new ModernButton("Cancelar") { DialogResult = DialogResult.Cancel, Location = new Point(418, 248), Size = new Size(92, 38) };
         AcceptButton = ok;
         CancelButton = cancel;

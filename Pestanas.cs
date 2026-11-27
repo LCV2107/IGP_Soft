@@ -40,6 +40,49 @@ internal static class PestanasWeb
 
 internal sealed record PestanaVista(string Titulo, bool Cargando);
 
+internal static class EscrituraZona
+{
+    private const ushort VK_TAB = 0x09, VK_RETURN = 0x0D;
+
+    public static NativeMethods.INPUT[] Entradas(string texto)
+    {
+        var lista = new List<NativeMethods.INPUT>();
+        void Tecla(ushort vk, ushort scan, uint flags)
+        {
+            lista.Add(new NativeMethods.INPUT { type = 1, ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = flags } });
+            lista.Add(new NativeMethods.INPUT { type = 1, ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = flags | NativeMethods.KEYEVENTF_KEYUP } });
+        }
+        foreach (char c in texto)
+        {
+            if (c == '\r') continue;
+            if (c == '\t') Tecla(VK_TAB, 0, 0);
+            else if (c == '\n') Tecla(VK_RETURN, 0, 0);
+            else Tecla(0, c, NativeMethods.KEYEVENTF_UNICODE);
+        }
+        return lista.ToArray();
+    }
+
+    public static bool Escribir(IntPtr superficie, IntPtr ventana, string texto)
+    {
+        IntPtr frente = NativeMethods.GetForegroundWindow();
+        uint yo = NativeMethods.GetCurrentThreadId();
+        uint suyo = NativeMethods.GetWindowThreadProcessId(frente, out _);
+        bool unido = suyo != 0 && suyo != yo && NativeMethods.AttachThreadInput(yo, suyo, true);
+        try
+        {
+            NativeMethods.SetForegroundWindow(superficie);
+            NativeMethods.SetFocus(ventana);
+        }
+        finally
+        {
+            if (unido) NativeMethods.AttachThreadInput(yo, suyo, false);
+        }
+        if (NativeMethods.GetForegroundWindow() != superficie) return false;
+        NativeMethods.INPUT[] entradas = Entradas(texto);
+        return NativeMethods.SendInput((uint)entradas.Length, entradas, System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.INPUT>()) == entradas.Length;
+    }
+}
+
 internal static class TecladoWeb
 {
     private const int WH_KEYBOARD_LL = 13;

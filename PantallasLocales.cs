@@ -68,6 +68,7 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
             EnforceWindows();
             VigilarVideos();
             RevisarVistas();
+            CapturarEnlaces();
             foreach (DisplaySurface surface in _surfaces.Values)
                 if (!surface.IsDisposed) surface.BarrasAlFrente();
         };
@@ -1810,6 +1811,19 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         return Ok();
     }
 
+    public Task<Resultado> EscribirEnZona(string monitor, int zona, string texto)
+    {
+        if (texto.Length is 0 or > 2000) return Task.FromResult(Resultado.Falla("texto_no_valido"));
+        if (FindMonitor(monitor) is not { } t) return NoMonitor();
+        if (t.Segments.FirstOrDefault(s => s.Index == zona) is not { } seg) return NoZona();
+        if (seg.Launched is not { Closed: false } w || !NativeMethods.IsWindow(w.Hwnd) ||
+            !_surfaces.TryGetValue(t.Device, out DisplaySurface? surface) || surface.IsDisposed)
+            return Task.FromResult(Resultado.Falla("zona_vacia"));
+        return Task.FromResult(EscrituraZona.Escribir(surface.Handle, w.Hwnd, texto)
+            ? Resultado.Bien
+            : new Resultado(false, "sin_foco", "Escribir", "Windows no dejó poner la zona al frente. Haz clic en la zona y vuelve a intentarlo.", Nivel.Aviso));
+    }
+
     public Task<Resultado> NavegarWeb(string monitor, int zona, string accion)
     {
         if (!PestanasWeb.EsAccion(accion)) return Task.FromResult(Resultado.Falla("accion_no_valida"));
@@ -1928,6 +1942,37 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         });
     }
 
+    private void CapturarEnlaces()
+    {
+        DateTime ahora = DateTime.Now;
+        foreach (PantallaMonitor t in _pantallas)
+            foreach (Segment s in t.Usable)
+            {
+                if (s.Link?.Url is not { } url || s.Pending is not null || s.Launched is not { Closed: false, Native: false, Capturado: false } w) continue;
+                if (!PestanasWeb.EsWeb(url) && !WindowManager.IsWindowSpec(url)) continue;
+                if (!NativeMethods.IsWindowVisible(w.Hwnd) || !NativeMethods.GetWindowRect(w.Hwnd, out NativeMethods.RECT r)) continue;
+                if (w.Visto == default) { w.Visto = ahora; continue; }
+                if (ahora - w.Visto < TimeSpan.FromSeconds(6)) continue;
+                w.Capturado = true;
+                IntPtr hwnd = w.Hwnd;
+                Rectangle ventana = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+                Task.Run(() =>
+                {
+                    using Bitmap? img = CapturarVentana(hwnd, ventana);
+                    if (img is null || Uniforme(img, new Rectangle(Point.Empty, img.Size))) return;
+                    int ancho = Math.Min(320, img.Width), alto = Math.Max(1, img.Height * ancho / img.Width);
+                    using var chica = new Bitmap(ancho, alto);
+                    using (Graphics g = Graphics.FromImage(chica))
+                    {
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(img, 0, 0, ancho, alto);
+                    }
+                    CapturasEnlaces.Guardar(url, Imagenes.Jpeg(chica));
+                    Miniaturas.Olvidar(url);
+                });
+            }
+    }
+
     internal readonly record struct VentanaZona(IntPtr Hwnd, Rectangle Ventana, Rectangle Visible, string? Url = null);
 
     private static List<VentanaZona> ZonasProyectadas(PantallaMonitor t)
@@ -1971,15 +2016,11 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                     g.DrawImage(img, destino, origen, GraphicsUnit.Pixel);
                     continue;
                 }
-                if (SinTapar(z))
+                using Bitmap? pantalla = SinTapar(z) ? CopiaDePantalla(z.Visible) : null;
+                if (pantalla is not null && !Uniforme(pantalla, new Rectangle(Point.Empty, pantalla.Size)))
                 {
-                    using var pantalla = new Bitmap(z.Visible.Width, z.Visible.Height);
-                    using (Graphics gp = Graphics.FromImage(pantalla)) gp.CopyFromScreen(z.Visible.Location, Point.Empty, z.Visible.Size);
-                    if (!Uniforme(pantalla, new Rectangle(Point.Empty, pantalla.Size)))
-                    {
-                        g.DrawImage(pantalla, destino);
-                        continue;
-                    }
+                    g.DrawImage(pantalla, destino);
+                    continue;
                 }
                 using Image? mini = MiniaturaVideo(z.Url);
                 if (mini is not null)
@@ -2008,6 +2049,21 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
                 if (Math.Abs(c.R - c0.R) + Math.Abs(c.G - c0.G) + Math.Abs(c.B - c0.B) > 24) return false;
             }
         return true;
+    }
+
+    private static Bitmap? CopiaDePantalla(Rectangle area)
+    {
+        var bmp = new Bitmap(area.Width, area.Height);
+        try
+        {
+            using (Graphics g = Graphics.FromImage(bmp)) g.CopyFromScreen(area.Location, Point.Empty, area.Size);
+            return bmp;
+        }
+        catch
+        {
+            bmp.Dispose();
+            return null;
+        }
     }
 
     private static bool SinTapar(VentanaZona z)
@@ -2123,6 +2179,16 @@ internal sealed class PantallasLocales : IPantallas, IDisposable
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg != 0x0210 || (m.WParam.ToInt64() & 0xFFFF) != 0x0201) return;
+            long lp = m.LParam.ToInt64();
+            var punto = new NativeMethods.POINT { X = (short)(lp & 0xFFFF), Y = (short)((lp >> 16) & 0xFFFF) };
+            IntPtr hija = NativeMethods.ChildWindowFromPointEx(Handle, punto, 1 | 4);
+            if (hija != IntPtr.Zero && hija != Handle) NativeMethods.SetFocus(hija);
+        }
 
         protected override CreateParams CreateParams
         {

@@ -1,10 +1,13 @@
 namespace IGP_Soft;
 
-internal sealed record AccionZona(string Icono, string Texto, Action<Control> Clic, bool Activa = true, string? Ayuda = null, bool Peligro = false, bool Cierra = true);
+internal sealed record AccionZona(string Icono, string Texto, Action<Control> Clic, bool Activa = true, string? Ayuda = null, bool Peligro = false, bool Cierra = true, bool Marcado = false);
 
 internal sealed class PanelZonaForm : Form
 {
     private const string ClaveSeguir = "panelzona.seguir";
+    private const string ClavePosicion = "panelzona.posicion";
+
+    private static bool Seguir => Config.Get(ClaveSeguir) == "1";
 
     private readonly Func<EstadoPantallas> _estado;
     private readonly Func<EstadoMonitor, EstadoZona, IReadOnlyList<AccionZona>> _acciones;
@@ -23,9 +26,8 @@ internal sealed class PanelZonaForm : Form
     private readonly FlowLayoutPanel _filtros = new() { Dock = DockStyle.Top, Height = 38, WrapContents = false, Padding = new Padding(12, 2, 14, 0) };
     private readonly Panel _desplazable = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14, 4, 6, 4) };
     private readonly LienzoTarjetas _tarjetas = new();
-    private readonly Panel _piePanel = new() { Dock = DockStyle.Bottom, Height = 58 };
-    private readonly ToggleSwitch _seguir = new("Seguir con la siguiente zona");
-    private readonly FlowLayoutPanel _pieBotones = new() { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, Padding = new Padding(0, 12, 12, 0) };
+    private readonly Panel _piePanel = new() { Dock = DockStyle.Bottom, Height = 92 };
+    private readonly FlowLayoutPanel _pieBotones = new() { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(14, 10, 14, 4) };
     private readonly Label _vacio = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TextMuted, Visible = false };
     private TipoEnlace? _filtro;
 
@@ -48,14 +50,21 @@ internal sealed class PanelZonaForm : Form
         TopMost = true;
         BackColor = Theme.Surface;
         Font = Theme.Body;
-        Size = new Size(744, 620);
+        Size = new Size(744, 650);
         Padding = new Padding(1);
         DoubleBuffered = true;
 
         _cabecera.BackColor = Theme.Sidebar;
         _cabecera.Paint += PintarCabecera;
         _cabecera.MouseClick += (_, e) => { if (CerrarRect.Contains(e.Location)) Close(); };
-        _cabecera.MouseMove += (_, e) => _cabecera.Cursor = CerrarRect.Contains(e.Location) ? Cursors.Hand : Cursors.Default;
+        _cabecera.MouseMove += (_, e) => _cabecera.Cursor = CerrarRect.Contains(e.Location) ? Cursors.Hand : Cursors.SizeAll;
+        _cabecera.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left || CerrarRect.Contains(e.Location)) return;
+            NativeMethods.ReleaseCapture();
+            NativeMethods.SendMessage(Handle, 0x00A1, (IntPtr)2, IntPtr.Zero);
+            Config.Set(ClavePosicion, $"{Left},{Top}");
+        };
 
         _botones.BackColor = Theme.Surface;
         _busqueda.BackColor = Theme.Surface;
@@ -87,14 +96,8 @@ internal sealed class PanelZonaForm : Form
 
         _piePanel.BackColor = Theme.SurfaceAlt;
         _piePanel.Paint += (_, e) => { using var p = new Pen(Theme.Border); e.Graphics.DrawLine(p, 0, 0, _piePanel.Width, 0); };
-        _seguir.Location = new Point(14, 13);
-        _seguir.Size = _seguir.GetPreferredSize(Size.Empty);
-        _seguir.BackColor = Theme.SurfaceAlt;
-        _seguir.Checked = Config.Get(ClaveSeguir) == "1";
-        _seguir.CheckedChanged += (_, _) => Config.Set(ClaveSeguir, _seguir.Checked ? "1" : "0");
         _pieBotones.BackColor = Theme.SurfaceAlt;
         _piePanel.Controls.Add(_pieBotones);
-        _piePanel.Controls.Add(_seguir);
 
         Controls.Add(_desplazable);
         Controls.Add(_filtros);
@@ -150,11 +153,24 @@ internal sealed class PanelZonaForm : Form
 
     public void MostrarEn(Point cursor, IWin32Window owner)
     {
+        Location = PosicionGuardada() ?? JuntoA(cursor);
+        Show(owner);
+    }
+
+    private Point JuntoA(Point cursor)
+    {
         Rectangle area = Screen.FromPoint(cursor).WorkingArea;
         int x = Math.Clamp(cursor.X + 8, area.X + 4, Math.Max(area.X + 4, area.Right - Width - 4));
         int y = Math.Clamp(cursor.Y - 40, area.Y + 4, Math.Max(area.Y + 4, area.Bottom - Height - 4));
-        Location = new Point(x, y);
-        Show(owner);
+        return new Point(x, y);
+    }
+
+    private Point? PosicionGuardada()
+    {
+        string[] p = (Config.Get(ClavePosicion) ?? "").Split(',');
+        if (p.Length != 2 || !int.TryParse(p[0], out int x) || !int.TryParse(p[1], out int y)) return null;
+        var cabecera = new Point(x + Width / 2, y + 20);
+        return Screen.AllScreens.Any(s => s.WorkingArea.Contains(cabecera)) ? new Point(x, y) : null;
     }
 
     private void Construir()
@@ -168,19 +184,20 @@ internal sealed class PanelZonaForm : Form
         foreach (Control c in _botones.Controls.Cast<Control>().ToList()) c.Dispose();
         _botones.Controls.Clear();
         foreach (AccionZona a in _acciones(m, z)) _botones.Controls.Add(new BotonAccion(a, Ejecutar));
+        bool contenido = !z.Desactivada && z.Estado != EstadosZona.Abriendo;
         foreach (Control c in _pieBotones.Controls.Cast<Control>().ToList()) c.Dispose();
         _pieBotones.Controls.Clear();
-        foreach (AccionZona a in _pie(m, z))
-        {
-            var b = new ModernButton(a.Texto, ButtonKind.Ghost, a.Icono) { Enabled = a.Activa, Margin = new Padding(6, 0, 0, 0) };
-            b.Size = b.GetPreferredSize(Size.Empty);
-            AccionZona captured = a;
-            b.Click += (_, _) => Ejecutar(captured, b);
-            _pieBotones.Controls.Add(b);
-        }
-        bool contenido = !z.Desactivada && z.Estado != EstadosZona.Abriendo;
+        var pie = new List<AccionZona>();
+        if (contenido)
+            pie.Add(new AccionZona("⇥", "Seguir a la siguiente", _ =>
+            {
+                Config.Set(ClaveSeguir, Seguir ? "0" : "1");
+                BeginInvoke(Construir);
+            }, Ayuda: "Encendido: al elegir algo, el panel pasa solo a la siguiente zona libre para seguir llenando el monitor.", Cierra: false, Marcado: Seguir));
+        pie.AddRange(_pie(m, z));
+        foreach (AccionZona a in pie) _pieBotones.Controls.Add(new BotonAccion(a, Ejecutar));
+        _piePanel.Visible = pie.Count > 0;
         _busqueda.Visible = _filtros.Visible = contenido;
-        _seguir.Visible = contenido;
         _tarjetas.Visible = contenido;
         _vacio.Visible = !contenido;
         _vacio.Text = z.Desactivada ? "Esta zona no se usa. Pulsa «Usar esta zona» para mostrar algo en ella."
@@ -259,7 +276,7 @@ internal sealed class PanelZonaForm : Form
         if (lista.Count == 0)
         {
             _vacio.Visible = true;
-            _vacio.Text = todos.Count == 0 ? "La lista de enlaces está vacía. Usa «Agregar archivo o URL…»." : "No hay nada que coincida con la búsqueda.";
+            _vacio.Text = todos.Count == 0 ? "La lista de enlaces está vacía. Usa «Agregar a la lista» o «Mostrar archivo o URL»." : "No hay nada que coincida con la búsqueda.";
         }
         else if (Zona is { Desactivada: false } z && z.Estado != EstadosZona.Abriendo) _vacio.Visible = false;
     }
@@ -282,7 +299,7 @@ internal sealed class PanelZonaForm : Form
         _elegir(m, z, t.Enlace);
         _pendientes[t.Enlace.Url] = (_monitor, _zona);
         _asignadas.Add(_zona);
-        if (!_seguir.Checked)
+        if (!Seguir)
         {
             Close();
             return;
@@ -413,6 +430,65 @@ internal sealed class ControlZoom : Control
     }
 }
 
+internal sealed class ControlEscribir : Control
+{
+    private readonly Func<string, Task<Resultado>> _enviar;
+    private readonly TextBox _texto = new() { Font = Theme.Body, BorderStyle = BorderStyle.FixedSingle };
+    private readonly Label _estado = new() { AutoSize = false, Font = Theme.Small, ForeColor = Theme.TextMuted };
+
+    public ControlEscribir(Func<string, Task<Resultado>> enviar)
+    {
+        _enviar = enviar;
+        BackColor = Theme.Surface;
+        Size = new Size(372, 150);
+        Controls.Add(new Label { Text = "Escribir en la zona", Font = Theme.BodyBold, ForeColor = Theme.Text, Location = new Point(12, 10), AutoSize = true });
+        _texto.Location = new Point(12, 36);
+        _texto.Width = 348;
+        _texto.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter) return;
+            e.SuppressKeyPress = true;
+            _ = Enviar(_texto.Text, true);
+        };
+        Controls.Add(_texto);
+        void B(string texto, int x, int w, ButtonKind tipo, Func<Task> clic)
+        {
+            var b = new ModernButton(texto, tipo) { Location = new Point(x, 72), Size = new Size(w, 36) };
+            b.Click += async (_, _) => await clic();
+            Controls.Add(b);
+        }
+        B("Enviar texto", 12, 120, ButtonKind.Primary, () => Enviar(_texto.Text, true));
+        B("⇥ Tab", 140, 100, ButtonKind.Secondary, () => Enviar("\t", false));
+        B("↵ Enter", 248, 112, ButtonKind.Secondary, () => Enviar("\n", false));
+        _estado.Location = new Point(12, 114);
+        _estado.Size = new Size(348, 32);
+        _estado.Text = "Primero haz clic en el campo de la página. Tab pasa al campo siguiente; Enter envía.";
+        Controls.Add(_estado);
+    }
+
+    private async Task Enviar(string texto, bool limpiar)
+    {
+        if (texto.Length == 0) return;
+        Resultado r = await _enviar(texto);
+        if (IsDisposed) return;
+        if (r.Ok && limpiar) _texto.Clear();
+        _estado.ForeColor = r.Ok ? Theme.Success : Theme.Danger;
+        _estado.Text = r.Ok ? "✓ Enviado a la zona." : r.Mensaje ?? "No se pudo escribir en la zona.";
+        _texto.Focus();
+    }
+
+    public static void Mostrar(Control junto, Func<string, Task<Resultado>> enviar)
+    {
+        var control = new ControlEscribir(enviar);
+        var host = new ToolStripControlHost(control) { Margin = Padding.Empty, Padding = Padding.Empty, AutoSize = false, Size = control.Size };
+        var drop = new ToolStripDropDown { Padding = new Padding(1) };
+        drop.Items.Add(host);
+        drop.Closed += (_, _) => junto.BeginInvoke(drop.Dispose);
+        drop.Show(junto, new Point(0, junto.Height));
+        control._texto.Focus();
+    }
+}
+
 internal sealed record TarjetaEnlace(LinkDef Enlace, TipoEnlace Tipo, string? Donde)
 {
     public bool Aqui => Donde == "";
@@ -471,11 +547,13 @@ internal sealed class BotonAccion : Control
         g.Clear(Parent?.BackColor ?? Theme.Surface);
         Theme.Smooth(g);
         var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Color fondo = !Enabled ? Theme.SurfaceAlt
-            : _encima ? (_accion.Peligro ? Theme.DangerSoft : Theme.AccentSoft)
-            : Theme.SurfaceAlt;
+        Color normal = Parent?.BackColor == Theme.SurfaceAlt ? Theme.Surface : Theme.SurfaceAlt;
+        Color fondo = !Enabled ? normal
+            : _encima || _accion.Marcado ? (_accion.Peligro ? Theme.DangerSoft : Theme.AccentSoft)
+            : normal;
+        bool resaltado = Focused || _accion.Marcado;
         Theme.FillRound(g, fondo, r, 10);
-        Theme.DrawRound(g, Focused ? Theme.Accent : _encima ? (_accion.Peligro ? Theme.Danger : Theme.Accent) : Theme.Border, r, 10, Focused ? 1.6f : 1f);
+        Theme.DrawRound(g, resaltado ? Theme.Accent : _encima ? (_accion.Peligro ? Theme.Danger : Theme.Accent) : Theme.Border, r, 10, resaltado ? 1.6f : 1f);
         Color tinta = !Enabled ? Theme.TextSubtle : _accion.Peligro ? Theme.Danger : Theme.Accent;
         TextRenderer.DrawText(g, _accion.Icono, Grande, new Rectangle(0, 6, Width, 34), tinta,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);

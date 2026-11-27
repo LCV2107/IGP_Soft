@@ -391,6 +391,11 @@ internal sealed class LaunchedWindow
 {
     public VistaImagen? VistaPagina { get; set; }
     public bool PaginaImagen { get; set; }
+    public DateTime Visto;
+    public bool Capturado;
+    public int Colocaciones;
+    public DateTime DesdeColocar;
+    public bool SinForzar;
 
     public required int ProcessId { get; init; }
     public required IntPtr Hwnd { get; init; }
@@ -1036,7 +1041,11 @@ internal static class WindowManager
                 {
                     lock (win)
                     {
-                        if (next is { } a) win.DesiredArea = a;
+                        if (next is { } a)
+                        {
+                            if (a != win.DesiredArea) win.SinForzar = false;
+                            win.DesiredArea = a;
+                        }
                     }
                     PlaceWindow(win, probeMs: 2000);
                 }
@@ -1098,6 +1107,16 @@ internal static class WindowManager
     }
 
     private const int MaxStyleFixes = 6;
+
+    internal static bool Pelea(LaunchedWindow win, DateTime ahora)
+    {
+        if (ahora - win.DesdeColocar > TimeSpan.FromSeconds(10))
+        {
+            win.DesdeColocar = ahora;
+            win.Colocaciones = 0;
+        }
+        return ++win.Colocaciones > 6;
+    }
 
     private static void PlaceWindow(LaunchedWindow win, uint probeMs = 0)
     {
@@ -1175,6 +1194,13 @@ internal static class WindowManager
             if (!frameChanged && win.ParentHwnd != IntPtr.Zero &&
                 NativeMethods.IsWindowVisible(hwnd) && IsAt(hwnd, win.ParentHwnd, target))
                 return;
+            if (foreign && win.SinForzar) return;
+            if (foreign && Pelea(win, DateTime.UtcNow))
+            {
+                win.SinForzar = true;
+                Diagnostico.Log($"«{win.ProcessName}» cambia sola su posición o tamaño una y otra vez: se deja de forzar para que no tiemble");
+                return;
+            }
             if (!Ready()) return;
 
             uint async = foreign ? NativeMethods.SWP_ASYNCWINDOWPOS : 0;
@@ -1598,6 +1624,38 @@ internal static class NativeMethods
     public static extern bool IsWindow(IntPtr hWnd);
 
     public const uint PW_RENDERFULLCONTENT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr ChildWindowFromPointEx(IntPtr hwndParent, POINT pt, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
+    public struct INPUT { [FieldOffset(0)] public uint type; [FieldOffset(8)] public KEYBDINPUT ki; }
+
+    public const uint KEYEVENTF_KEYUP = 2, KEYEVENTF_UNICODE = 4;
+
+    [DllImport("user32.dll")]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);

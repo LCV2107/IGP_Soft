@@ -83,7 +83,11 @@ internal sealed class MainForm : Form
         {
             LinkStore.Remote = list => _ = _p.GuardarEnlaces(list);
             ProfileStore.Remote = list => _ = _p.GuardarPerfiles(list);
-            if (_p is IArchivosRemotos archivos) _envios = new EnviosRemotos(archivos);
+            if (_p is IArchivosRemotos archivos)
+            {
+                _envios = new EnviosRemotos(archivos);
+                Miniaturas.Remota = u => archivos.Miniatura(u, 256);
+            }
         }
 
         BuildLayout();
@@ -984,11 +988,57 @@ internal sealed class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+        AbrirPanelZona(m.Id, zona.Zona);
+    }
+
+    private void AbrirPanelZona(string monitor, int zona)
+    {
         _panelZona?.Close();
-        var panel = new PanelZonaForm(() => _estado, m.Id, zona.Zona, AccionesDeZona, PieDeZona, (mon, z, link) => Open(mon.Id, z.Zona, link));
+        var panel = new PanelZonaForm(() => _estado, monitor, zona, AccionesDeZona, PieDeZona, (mon, z, link) => Open(mon.Id, z.Zona, link));
         panel.FormClosed += (_, _) => { if (_panelZona == panel) _panelZona = null; };
         _panelZona = panel;
         panel.MostrarEn(Cursor.Position, this);
+    }
+
+    private async void AgregarALista(EstadoMonitor m, EstadoZona zona)
+    {
+        List<LinkDef> nuevos;
+        using (var d = new CustomElementForm(m.Numero, Remoto ? TiposPermitidos.Filtro : null, soloLista: true))
+        {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            nuevos = d.Archivos.Count > 1
+                ? d.Archivos.Select(Repartos.Elemento).ToList()
+                : new() { d.Titulo.Length > 0 ? new LinkDef(d.Titulo, d.Target) : AssetStore.IsExternalFile(d.Target) ? Repartos.Elemento(d.Target) : new LinkDef(d.Target, d.Target) };
+        }
+        var errores = new List<string>();
+        foreach (LinkDef l in nuevos)
+        {
+            string target = l.Url;
+            if (AssetStore.IsExternalFile(target))
+            {
+                if (Remoto)
+                {
+                    if (_envios is null) return;
+                    (Resultado R, string? Url) sent = await _envios.Enviar(target);
+                    if (!sent.R.Ok || sent.Url is null)
+                    {
+                        if (sent.R.Mensaje is not null) errores.Add(sent.R.Mensaje);
+                        continue;
+                    }
+                    target = sent.Url;
+                }
+                else
+                {
+                    UseWaitCursor = true;
+                    try { target = await Task.Run(() => AssetStore.Import(target)); }
+                    finally { UseWaitCursor = false; }
+                }
+            }
+            LinkStore.Add(new LinkDef(l.Titulo, target));
+        }
+        if (errores.Count > 0)
+            ShowAviso(new Resultado(false, "agregar", "Agregar a la lista", string.Join("\n\n", errores.Distinct()), Nivel.Aviso));
+        if (!IsDisposed) AbrirPanelZona(m.Id, zona.Zona);
     }
 
     private static string? Atajo(string clave)
@@ -1043,11 +1093,16 @@ internal sealed class MainForm : Form
     private IReadOnlyList<AccionZona> PieDeZona(EstadoMonitor m, EstadoZona zona)
     {
         if (zona.Desactivada || zona.Estado == EstadosZona.Abriendo) return Array.Empty<AccionZona>();
-        return new[]
+        var lista = new List<AccionZona>
         {
-            new AccionZona("＋", "Agregar archivo o URL…", _ => AddCustomElement(m, zona), Ayuda: "Uno o varios archivos, o una dirección web. Si eliges varios, se reparten en el monitor."),
-            new AccionZona("▣", "Adjuntar ventana…", c => MostrarVentanas(m, zona, c), Cierra: false, Ayuda: "Mostrar en esta zona una ventana que ya está abierta."),
+            new AccionZona("▶", "Mostrar archivo o URL", _ => AddCustomElement(m, zona), Ayuda: "Muestra en esta zona uno o varios archivos, o una dirección web. Si eliges varios, se reparten en el monitor."),
+            new AccionZona("＋", "Agregar a la lista", _ => AgregarALista(m, zona), Ayuda: "Agrega archivos o una dirección web a la lista de este panel sin mostrarlos todavía."),
+            new AccionZona("▣", "Adjuntar ventana", c => MostrarVentanas(m, zona, c), Cierra: false, Ayuda: "Mostrar en esta zona una ventana que ya está abierta."),
         };
+        if ((zona.Web || zona.Adjunta) && zona.Estado == EstadosZona.EnPantalla)
+            lista.Add(new AccionZona("⌨", "Escribir", c => ControlEscribir.Mostrar(c, t => _p.EscribirEnZona(m.Id, zona.Zona, t)), Cierra: false,
+                Ayuda: "Escribe en la página o ventana de esta zona, por ejemplo el usuario y la contraseña de un inicio de sesión."));
+        return lista;
     }
 
     private async void MostrarVentanas(EstadoMonitor m, EstadoZona zona, Control junto)

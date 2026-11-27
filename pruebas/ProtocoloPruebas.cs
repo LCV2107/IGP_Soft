@@ -54,6 +54,7 @@ internal sealed class PantallasFalsas : IPantallas
     public Task<Resultado> ActivarPestana(string monitor, int zona, int indice) => Ok($"activar {monitor} {zona} {indice}");
     public Task<Resultado> CerrarPestana(string monitor, int zona, int indice) => Ok($"cerrar_pestana {monitor} {zona} {indice}");
     public Task<Resultado> NavegarWeb(string monitor, int zona, string accion) => Ok($"navegar {monitor} {zona} {accion}");
+    public Task<Resultado> EscribirEnZona(string monitor, int zona, string texto) => Ok($"escribir {monitor} {zona} {texto}");
     public Task<Resultado> VistaImagen(string monitor, int zona, string accion) => Ok($"vista {monitor} {zona} {accion}");
     public Task<Resultado> Ampliar(string monitor, int zona) => Ok($"ampliar {monitor} {zona}");
     public Task<Resultado> Restaurar(string? monitor) => Ok($"restaurar {monitor ?? "todos"}");
@@ -148,6 +149,7 @@ public sealed class ProtocoloPruebas : IDisposable
         Assert.True((await c.ActivarPestana("MON-A-1", 0, 1)).Ok);
         Assert.True((await c.CerrarPestana("MON-A-1", 0, 1)).Ok);
         Assert.True((await c.NavegarWeb("MON-A-1", 0, PestanasWeb.Atras)).Ok);
+        Assert.True((await c.EscribirEnZona("MON-A-1", 0, "usuario\tclave\n")).Ok);
         Assert.True((await c.VistaImagen("MON-A-1", 0, "acercar")).Ok);
         Assert.Equal("enlace_no_permitido", (await c.AbrirPestana("MON-A-1", 0, new LinkDef("x", "ventana:cmd|x"))).Codigo);
         Assert.Single(await c.VentanasAbiertas());

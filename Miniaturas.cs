@@ -59,7 +59,19 @@ internal static class Miniaturas
 
     public static event Action? Lista;
 
+    public static Func<string, Task<byte[]?>>? Remota { get; set; }
+
     public static void Iniciar() => _ui ??= SynchronizationContext.Current;
+
+    public static void Olvidar(string url)
+    {
+        lock (Cerrojo)
+        {
+            Hechas.Remove(url);
+            Pedidas.Remove(url);
+        }
+        if (_ui is { } ui) ui.Post(_ => Lista?.Invoke(), null);
+    }
 
     private static string? Archivo(string url)
     {
@@ -74,25 +86,38 @@ internal static class Miniaturas
 
     public static Image? De(string url)
     {
-        if (Archivo(url) is not { } ruta) return null;
+        if (string.IsNullOrEmpty(url)) return null;
         TipoEnlace tipo = TiposEnlace.De(url);
-        if (tipo is not (TipoEnlace.Imagen or TipoEnlace.Video or TipoEnlace.Documento)) return null;
+        bool archivo = tipo is TipoEnlace.Imagen or TipoEnlace.Video or TipoEnlace.Documento;
+        string? ruta = archivo ? Archivo(url) : CapturasEnlaces.Existente(url);
+        Func<string, Task<byte[]?>>? remota = Remota;
+        if (ruta is null && (remota is null || (archivo && !AssetStore.IsAssetPath(url)) || tipo == TipoEnlace.Otro)) return null;
         lock (Cerrojo)
         {
-            if (Hechas.TryGetValue(ruta, out Image? lista)) return lista;
-            if (!Pedidas.Add(ruta)) return null;
+            if (Hechas.TryGetValue(url, out Image? lista)) return lista;
+            if (!Pedidas.Add(url)) return null;
         }
         _ui ??= SynchronizationContext.Current;
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             Image? img = null;
             try
             {
-                using Image? src = Thumbnails.Best(ruta, 256);
-                if (src is not null) img = Thumbnails.Compose(src, ruta, Tamano);
+                byte[]? jpeg = ruta is null ? await remota!(url).ConfigureAwait(false) : archivo ? null : File.ReadAllBytes(ruta);
+                if (jpeg is { Length: > 0 })
+                {
+                    using var ms = new MemoryStream(jpeg);
+                    using Image src = Image.FromStream(ms);
+                    img = Thumbnails.Compose(src, url, Tamano);
+                }
+                else if (ruta is not null && archivo)
+                {
+                    using Image? src = Thumbnails.Best(ruta, 256);
+                    if (src is not null) img = Thumbnails.Compose(src, url, Tamano);
+                }
             }
             catch { }
-            lock (Cerrojo) Hechas[ruta] = img;
+            lock (Cerrojo) Hechas[url] = img;
             if (img is null) return;
             if (_ui is { } ui) ui.Post(_ => Lista?.Invoke(), null);
             else Lista?.Invoke();
@@ -245,6 +270,36 @@ internal static class DibujoPerfil
         float k = Math.Max(caja.Width / (float)img.Width, caja.Height / (float)img.Height);
         int w = (int)(img.Width * k), h = (int)(img.Height * k);
         return new Rectangle(caja.X + (caja.Width - w) / 2, caja.Y + (caja.Height - h) / 2, w, h);
+    }
+}
+
+internal static class CapturasEnlaces
+{
+    public const string NombreCarpeta = "IGP_Soft.enlaces.capturas";
+
+    public static string Carpeta { get; set; } = Path.Combine(AppPaths.DataDir, NombreCarpeta);
+
+    public static string Ruta(string url)
+    {
+        byte[] h = System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url.Trim().ToLowerInvariant()));
+        return Path.Combine(Carpeta, Convert.ToHexString(h, 0, 10).ToLowerInvariant() + ".jpg");
+    }
+
+    public static string? Existente(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || (!PestanasWeb.EsWeb(url) && !WindowManager.IsWindowSpec(url))) return null;
+        string r = Ruta(url);
+        return File.Exists(r) ? r : null;
+    }
+
+    public static void Guardar(string url, byte[] jpeg)
+    {
+        try
+        {
+            Directory.CreateDirectory(Carpeta);
+            File.WriteAllBytes(Ruta(url), jpeg);
+        }
+        catch { }
     }
 }
 
